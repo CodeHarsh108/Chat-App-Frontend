@@ -1,5 +1,15 @@
-import React from 'react'
+import React, { useRef, useState } from 'react'
 import { MdAttachFile, MdSend } from 'react-icons/md'
+
+
+
+const [messages, setMessages] = useState([]);
+const [input, setInput] = useState('');
+const inputRef = useRef(null);
+const chatBoxRef = useRef(null);
+const [stompClient, setStompClient] = useState(null);
+const [roomId, setRoomId] = useState(" ");
+
 
 export const ChatPage = () => {
   return (
@@ -29,6 +39,19 @@ export const ChatPage = () => {
         </div>
       </header>
 
+
+      <main className='py-20 h-screen overflow-auto w-2/3 dark:bg-slate-700 mx-auto '>
+        <div className=''>
+          {
+            messages.map((message, index) => {
+              <div key={index} >
+
+              </div>
+            })
+          }
+        </div>
+      </main>
+
       
       {/* input message container */}
       <div className=" fixed bottom-4 w-full h-16 ">
@@ -41,7 +64,7 @@ export const ChatPage = () => {
 
           <div className="flex gap-1">
             <button className="dark:bg-purple-600 h-10 w-10  flex   justify-center items-center rounded-full">
-              <MdAttachFile size={20} />
+              <MdAttachFile  size={20} />
             </button>
             <button
               className="dark:bg-green-600 h-10 w-10  flex   justify-center items-center rounded-full"
