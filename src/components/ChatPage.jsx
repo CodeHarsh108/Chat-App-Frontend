@@ -3,15 +3,34 @@ import { MdAttachFile, MdSend } from 'react-icons/md'
 
 
 
-const [messages, setMessages] = useState([]);
+
+export const ChatPage = () => {
+  const [messages, setMessages] = useState([
+  { sender: 'Alice', content: 'Hello!' },
+  { sender: 'Bob', content: 'Hi there!' },
+  { sender: 'Alice', content: 'How are you?' }, 
+  { sender: 'Bob', content: 'I am good, thanks! How about you?' },
+  { sender: 'Alice', content: 'I am doing well, thank you!' },
+  { sender: 'Bob', content: 'Great to hear!' },
+  { sender: 'Alice', content: 'What are your plans for the weekend?' },
+  { sender: 'Bob', content: 'I am thinking of going hiking. How about you?' },
+  { sender: 'Alice', content: 'That sounds fun! I might join you.' },
+  { sender: 'Bob', content: 'Awesome! Let\'s plan it out later.' },
+  { sender: 'Alice', content: 'Sure thing!' },
+  { sender: 'Bob', content: 'See you then!' },
+  { sender: 'Alice', content: 'See you!' },
+  { sender: 'Bob', content: 'Bye!' },
+  { sender: 'Alice', content: 'Bye!' },
+  { sender: 'Bob', content: 'Take care!' },
+  { sender: 'Alice', content: 'You too!' },
+  { sender: 'Bob', content: 'Talk to you later!' },
+  { sender: 'Alice', content: 'Looking forward to it!' }, 
+]);
 const [input, setInput] = useState('');
 const inputRef = useRef(null);
 const chatBoxRef = useRef(null);
 const [stompClient, setStompClient] = useState(null);
-const [roomId, setRoomId] = useState(" ");
-
-
-export const ChatPage = () => {
+const [roomId, setRoomId] = useState(" "); 
   return (
     <div className="">
       {/* this is a header */}
@@ -41,15 +60,26 @@ export const ChatPage = () => {
 
 
       <main className='py-20 h-screen overflow-auto w-2/3 dark:bg-slate-700 mx-auto '>
-        <div className=''>
           {
             messages.map((message, index) => {
+              return(
               <div key={index} >
 
+                <div className='flex flex-row '>
+                  <img src="" alt="" />
+                  <div className='border flex flex-col gap-1 '>
+
+                  <p className='text-sm font-bold'>{message.sender}</p>
+                  <p>{message.content}</p>
+
+                </div>
+                </div>
+
+
               </div>
+              )
             })
           }
-        </div>
       </main>
 
       
