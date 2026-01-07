@@ -31,6 +31,7 @@ const inputRef = useRef(null);
 const chatBoxRef = useRef(null);
 const [stompClient, setStompClient] = useState(null);
 const [roomId, setRoomId] = useState(" "); 
+const [currentUser, setCurrentUser] = useState("Alice");
   return (
     <div className="">
       {/* this is a header */}
@@ -59,28 +60,27 @@ const [roomId, setRoomId] = useState(" ");
       </header>
 
 
-      <main className='py-20 h-screen overflow-auto w-2/3 dark:bg-slate-700 mx-auto '>
-          {
-            messages.map((message, index) => {
-              return(
-              <div key={index} >
-
-                <div className='flex flex-row '>
-                  <img src="" alt="" />
-                  <div className='border flex flex-col gap-1 '>
-
-                  <p className='text-sm font-bold'>{message.sender}</p>
-                  <p>{message.content}</p>
-
-                </div>
-                </div>
-
-
+      <main className='py-20 px-1 h-screen overflow-auto w-2/3 dark:bg-slate-700 mx-auto '>
+  {
+    messages.map((message, index) => {
+      return(
+        <div key={index} className={`flex ${message.sender === currentUser ? 'justify-end' : 'justify-start'}`}>
+          <div className={`my-2 p-3 rounded-lg max-w-lg ${message.sender === currentUser ? 'bg-blue-500 text-white' : 'bg-white dark:bg-gray-800 text-gray-900 dark:text-white'}`}>
+            
+            <div className='flex flex-row gap-2'>
+              <img src="https://avatar.iran.liara.run/public/22" alt="" className='h-10 w-10'/>
+              <div className='flex flex-col gap-1'>
+                <p className='text-sm font-bold'>{message.sender}</p>
+                <p>{message.content}</p>
               </div>
-              )
-            })
-          }
-      </main>
+            </div>
+            
+          </div>
+        </div>
+      )
+    })
+  }
+</main>
 
       
       {/* input message container */}
