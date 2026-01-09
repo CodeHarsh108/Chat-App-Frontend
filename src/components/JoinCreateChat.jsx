@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import chatIcon from '../assets/chat.png'
 import { MdRoom } from 'react-icons/md';
 import toast from 'react-hot-toast';
+import { createRoomAPI} from '../services/RoomServices';
 
 
 const JoinCreateChat = () => {
@@ -31,16 +32,27 @@ const JoinCreateChat = () => {
   }
 
   function joinChat(){
-    if(!validateForm()){
-      return;
+    if(validateForm()){
+      //logic to join chat
     }
-    // proceed to join the chat
-    alert(`Joining room ${details.roomId} as ${details.username}`);
   }
 
-  function createRoom(){
-
+  async function createRoom(){
+    if(validateForm()){
+      console.log("Creating Room");
+      console.log(details);
+      // Call API to create room on backend
+      try{
+        const response = await createRoomAPI(details.roomId);
+        console.log("Room created successfully: ", response);
+        toast.success("Room created successfully");
+      } catch(error){
+        console.log("Error creating room: ", error);
+    }
+    }
   }
+
+
 
   return (
     <div className='min-h-screen flex items-center justify-center'>
