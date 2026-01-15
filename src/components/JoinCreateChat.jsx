@@ -8,27 +8,28 @@ import { createRoomAPI} from '../services/RoomServices';
 const JoinCreateChat = () => {
 
 
-  const [details, setDetails] = useState({
+  const [detail, setDetail] = useState({
     roomId : '',
-    username : ''
+    username : '',
   });
 
 
 
 
   function handleFormInputChange(event){
-    setDetails({
-      ...details,
+    setDetail({
+      ...detail,
       [event.target.name] : event.target.value,
-    })
+    });
   }
 
 
   function validateForm(){
-    if(details.username.trim() === '' || details.roomId.trim() === ''){
+    if(detail.username === " " || detail.roomId === " "){
       toast.error("Please fill all the fields");
       return false;
     }
+    return true;
   }
 
   function joinChat(){
@@ -40,10 +41,10 @@ const JoinCreateChat = () => {
   async function createRoom(){
     if(validateForm()){
       console.log("Creating Room");
-      console.log(details);
+      console.log(detail);
       // Call API to create room on backend
       try{
-        const response = await createRoomAPI(details.roomId);
+        const response = await createRoomAPI(detail.roomId);
         console.log("Room created successfully: ", response);
         toast.success("Room created successfully");
       } catch(error){
@@ -65,13 +66,13 @@ const JoinCreateChat = () => {
             <h1 className='text-2xl font-semibold text-center margin'>Join Room Or Create Room</h1>
             <div className=''>
                 <label htmlFor="name" className='block font-medium mb-2'>Your Name : </label>
-                <input onChange={handleFormInputChange} value={details.username} name='username' placeholder='Enter your name ' type="text" id='name' className='w-full dark:bg-gray-200 px-4 py-2 border dark:border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-black'/>
+                <input onChange={handleFormInputChange} value={detail.username} name='username' placeholder='Enter your name ' type="text" id='name' className='w-full dark:bg-gray-200 px-4 py-2 border dark:border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-black'/>
             </div>
 
 
             <div className=''>
                 <label htmlFor="name" className='block font-medium mb-2'>Room Id : </label>
-                <input onChange={handleFormInputChange} value={details.roomId} name='roomId' placeholder='Enter room id ' type="text" id='name' className='w-full dark:bg-gray-200 px-4 py-2 border dark:border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-black'/>
+                <input onChange={handleFormInputChange} value={detail.roomId} name='roomId' placeholder='Enter room id ' type="text" id='name' className='w-full dark:bg-gray-200 px-4 py-2 border dark:border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-black'/>
             </div>
 
             <div>

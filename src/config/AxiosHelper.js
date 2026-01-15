@@ -1,5 +1,5 @@
-import Axios from 'axios';
+import axios from 'axios';
 export const baseURL = 'http://localhost:8080';
-export const  httpClient = Axios.create({
+export const  httpClient = axios.create({
     baseURL: baseURL, 
 });
