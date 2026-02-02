@@ -8,3 +8,8 @@ export const createRoomAPI = async(roomDetail) => {
     });
     return response.data;
 };
+
+export const joinRoomAPI = async(roomId) => {
+    const response = await httpClient.get(`/api/v1/rooms/${roomId}`);
+    return response.data; 
+};

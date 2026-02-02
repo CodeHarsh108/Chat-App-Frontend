@@ -3,6 +3,9 @@ import chatIcon from '../assets/chat.png'
 import { MdRoom } from 'react-icons/md';
 import toast from 'react-hot-toast';
 import { createRoomAPI} from '../services/RoomServices';
+import useChatContext from '../context/ChatContext';
+import { useNavigate } from 'react-router';
+import { joinRoomAPI } from '../services/RoomServices';
 
 
 const JoinCreateChat = () => {
@@ -13,6 +16,8 @@ const JoinCreateChat = () => {
     username : '',
   });
 
+  const {roomId, username, connected, setRoomId, setCurrentUser, setConnected} = useChatContext();
+  const navigate = useNavigate();
 
 
 
@@ -32,9 +37,24 @@ const JoinCreateChat = () => {
     return true;
   }
 
-  function joinChat(){
+  async function joinChat(){
     if(validateForm()){
       //logic to join chat
+      try{
+      const room = await joinRoomAPI(detail.roomId);
+      toast.success("Joined room successfully");
+      setCurrentUser(detail.username);
+      setRoomId(room.roomId);
+      setConnected(true);
+      navigate('/chat');
+      }catch(error){
+        console.log("Error joining room: ", error);
+        if(error.status == 404){
+          toast.error("Room not found");
+        }else{
+          toast.error("Error joining room");
+        }
+      }
     }
   }
 
@@ -47,8 +67,20 @@ const JoinCreateChat = () => {
         const response = await createRoomAPI(detail.roomId);
         console.log("Room created successfully: ", response);
         toast.success("Room created successfully");
+        //join the room
+        setCurrentUser(detail.username);
+        setRoomId(response.roomId);
+        setConnected(true);
+        // forward to chat page...
+        navigate('/chat');
+
       } catch(error){
         console.log("Error creating room: ", error);
+        if(error.status == 400){
+          toast.error("Room already exists");
+        }else{
+          toast.error("Error creating room"); 
+        } 
     }
     }
   }
