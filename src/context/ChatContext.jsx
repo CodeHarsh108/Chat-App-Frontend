@@ -1,5 +1,4 @@
 import { createContext, useContext, useState } from "react";
-import { DiSafari } from "react-icons/di";
 
 const ChatContext  = createContext();
 
@@ -16,5 +15,4 @@ export const ChatProvider = ({children}) => {
     );
 };
 
-const useChatContext = () => useContext(ChatContext);
-export default useChatContext;
+export const useChatContext = () => useContext(ChatContext);

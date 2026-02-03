@@ -3,7 +3,7 @@ import chatIcon from '../assets/chat.png'
 import { MdRoom } from 'react-icons/md';
 import toast from 'react-hot-toast';
 import { createRoomAPI} from '../services/RoomServices';
-import useChatContext from '../context/ChatContext';
+import { useChatContext } from '../context/ChatContext';
 import { useNavigate } from 'react-router';
 import { joinRoomAPI } from '../services/RoomServices';
 

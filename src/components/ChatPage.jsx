@@ -1,37 +1,60 @@
-import React, { useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { MdAttachFile, MdSend } from 'react-icons/md'
-
+import { useChatContext } from '../context/ChatContext';
+import { useNavigate } from 'react-router';
+import SockJS from 'sockjs-client';
+import { baseURL } from "../config/AxiosHelper";
+import { Stomp } from '@stomp/stompjs';
+import toast from 'react-hot-toast';
 
 
 
 export const ChatPage = () => {
+
+  const {roomId, currentUser, connected} = useChatContext();
+  const navigate = useNavigate();
+  useEffect(() => {
+    if(!connected){
+      navigate('/');
+    }
+  },[connected, roomId, currentUser]);
+
+
+
   const [messages, setMessages] = useState([
   { sender: 'Alice', content: 'Hello!' },
   { sender: 'Bob', content: 'Hi there!' },
   { sender: 'Alice', content: 'How are you?' }, 
-  { sender: 'Bob', content: 'I am good, thanks! How about you?' },
-  { sender: 'Alice', content: 'I am doing well, thank you!' },
-  { sender: 'Bob', content: 'Great to hear!' },
-  { sender: 'Alice', content: 'What are your plans for the weekend?' },
-  { sender: 'Bob', content: 'I am thinking of going hiking. How about you?' },
-  { sender: 'Alice', content: 'That sounds fun! I might join you.' },
-  { sender: 'Bob', content: 'Awesome! Let\'s plan it out later.' },
-  { sender: 'Alice', content: 'Sure thing!' },
-  { sender: 'Bob', content: 'See you then!' },
-  { sender: 'Alice', content: 'See you!' },
-  { sender: 'Bob', content: 'Bye!' },
-  { sender: 'Alice', content: 'Bye!' },
-  { sender: 'Bob', content: 'Take care!' },
-  { sender: 'Alice', content: 'You too!' },
-  { sender: 'Bob', content: 'Talk to you later!' },
-  { sender: 'Alice', content: 'Looking forward to it!' }, 
+  { sender: 'Bob', content: 'I am good, thanks! How about you?' }
 ]);
 const [input, setInput] = useState('');
 const inputRef = useRef(null);
 const chatBoxRef = useRef(null);
 const [stompClient, setStompClient] = useState(null);
-const [roomId, setRoomId] = useState(" "); 
-const [currentUser, setCurrentUser] = useState("Alice");
+
+useEffect(() => {
+  const connectWebSocket = () => {
+  const sock = new SockJS(`${baseURL}/chat`);
+  const client = Stomp.over(sock);
+  client.connect({}, () => {
+    setStompClient(client);
+    toast.success('Connected to chat server');
+    client.subscribe(`/topic/room/${roomId}`, (message) => {
+      console.log(message);
+      const newMessage  = JSON.parse(message.body);
+      setMessages((prev) => [...prev, newMessage] );
+    }
+    );
+  });
+  };
+  if(connected){
+    connectWebSocket();
+  }
+},[roomId]);
+
+
+
+
   return (
     <div className="">
       {/* this is a header */}
