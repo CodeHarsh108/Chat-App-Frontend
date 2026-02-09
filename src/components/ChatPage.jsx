@@ -1,101 +1,129 @@
-import React, { useEffect, useRef, useState } from 'react'
-import { MdAttachFile, MdSend } from 'react-icons/md'
-import { useChatContext } from '../context/ChatContext';
-import { useNavigate } from 'react-router';
-import SockJS from 'sockjs-client';
+import React, { useEffect, useRef, useState } from "react";
+import { MdAttachFile, MdSend } from "react-icons/md";
+import useChatContext from "../context/ChatContext";
+import { useNavigate } from "react-router";
+import SockJS from "sockjs-client";
+import { Stomp } from "@stomp/stompjs";
+import toast from "react-hot-toast";
 import { baseURL } from "../config/AxiosHelper";
-import { Stomp } from '@stomp/stompjs';
-import toast from 'react-hot-toast';
-import { getMessages } from '../services/RoomServices';
-import { timeAgo } from '../config/helper';
-
-
-
-export const ChatPage = () => {
-
-  const {roomId, currentUser, connected, setConnected, setRoomId, setCurrentUser} = useChatContext();
+import { getMessagess } from "../services/RoomServices";
+import { timeAgo } from "../config/helper";
+const ChatPage = () => {
+  const {
+    roomId,
+    currentUser,
+    connected,
+    setConnected,
+    setRoomId,
+    setCurrentUser,
+  } = useChatContext();
+  // console.log(roomId);
+  // console.log(currentUser);
+  // console.log(connected);
 
   const navigate = useNavigate();
   useEffect(() => {
-    if(!connected || !roomId || !currentUser){
-      navigate('/');
+    if (!connected) {
+      navigate("/");
     }
-  },[connected, roomId, currentUser]);
+  }, [connected, roomId, currentUser]);
 
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState("");
+  const inputRef = useRef(null);
+  const chatBoxRef = useRef(null);
+  const [stompClient, setStompClient] = useState(null);
 
+  //page init:
+  //messages ko load karne honge
 
-const [messages, setMessages] = useState([]);
-const [input, setInput] = useState('');
-const inputRef = useRef(null);
-const chatBoxRef = useRef(null);
-const [stompClient, setStompClient] = useState(null);
-
-useEffect(() => {
-  async function loadMessages(){
-    try{
-      const messages = await getMessages(roomId);
-      setMessages(messages);
-    } catch (error) {
-      console.error('Error loading messages: ', error);
+  useEffect(() => {
+    async function loadMessages() {
+      try {
+        const messages = await getMessagess(roomId);
+        // console.log(messages);
+        setMessages(messages);
+      } catch (error) {}
     }
-  }
-  if(connected){
-    loadMessages();
-  }
-}, []);
-
-useEffect(() => {
-  if(chatBoxRef.current){
-    chatBoxRef.current.scroll({
-      top: chatBoxRef.current.scrollHeight,
-      behavior: 'smooth',
-    });
-  }
-}, [messages]);
-
-useEffect(() => {
-  const connectWebSocket = () => {
-  const sock = new SockJS(`${baseURL}/chat`);
-  const client = Stomp.over(sock);
-  client.connect({}, () => {
-    setStompClient(client);
-    toast.success('Connected to chat server');
-    client.subscribe(`/topic/room/${roomId}`, (message) => {
-      console.log(message);
-      const newMessage  = JSON.parse(message.body);
-      setMessages((prev) => [...prev, newMessage] );
+    if (connected) {
+      loadMessages();
     }
-    );
-  });
+  }, []);
+
+  //scroll down
+
+  useEffect(() => {
+    if (chatBoxRef.current) {
+      chatBoxRef.current.scroll({
+        top: chatBoxRef.current.scrollHeight,
+        behavior: "smooth",
+      });
+    }
+  }, [messages]);
+
+  //stompClient ko init karne honge
+  //subscribe
+
+  useEffect(() => {
+    const connectWebSocket = () => {
+      ///SockJS
+      const sock = new SockJS(`${baseURL}/chat`);
+      const client = Stomp.over(sock);
+
+      client.connect({}, () => {
+        setStompClient(client);
+
+        toast.success("connected");
+
+        client.subscribe(`/topic/room/${roomId}`, (message) => {
+          console.log(message);
+
+          const newMessage = JSON.parse(message.body);
+
+          setMessages((prev) => [...prev, newMessage]);
+
+          //rest of the work after success receiving the message
+        });
+      });
+    };
+
+    if (connected) {
+      connectWebSocket();
+    }
+
+    //stomp client
+  }, [roomId]);
+
+  //send message handle
+
+  const sendMessage = async () => {
+    if (stompClient && connected && input.trim()) {
+      console.log(input);
+
+      const message = {
+        sender: currentUser,
+        content: input,
+        roomId: roomId,
+      };
+
+      stompClient.send(
+        `/app/sendMessage/${roomId}`,
+        {},
+        JSON.stringify(message)
+      );
+      setInput("");
+    }
+
+    //
   };
-  if(connected){
-    connectWebSocket();
+
+  function handleLogout() {
+    stompClient.disconnect();
+    setConnected(false);
+    setRoomId("");
+    setCurrentUser("");
+    navigate("/");
   }
-},[roomId]);
-
-const sendMessage = async () =>{
-  if(stompClient && connected && input.trim() !== ''){
-    console.log('sending message: ', input);
-  
-  const message = {
-    sender: currentUser,
-    content: input,
-    roomId: roomId
-  }
-
-  stompClient.send(`/app/sendMessage/${roomId}`, {}, JSON.stringify(message));
-  setInput("");
-}
-};
-
-function handleLogout(){
-  stompClient.disconnect();
-  setConnected(false);
-  setRoomId("");
-  setCurrentUser("");
-  navigate('/');
-}
-
 
   return (
     <div className="">
@@ -143,11 +171,10 @@ function handleLogout(){
             >
               <div className="flex flex-row gap-2">
                 <img
-  className="h-10 w-10 rounded-full"
-  src={`https://api.dicebear.com/7.x/identicon/svg?seed=${message.sender}`}
-  alt="avatar"
-/>
-
+                  className="h-10 w-10"
+                  src={"https://avatar.iran.liara.run/public/43"}
+                  alt=""
+                />
                 <div className="flex flex-col gap-1">
                   <p className="text-sm font-bold">{message.sender}</p>
                   <p>{message.content}</p>
@@ -196,5 +223,3 @@ function handleLogout(){
 };
 
 export default ChatPage;
-
-
