@@ -1,8 +1,13 @@
 import { httpClient } from "../config/AxiosHelper";
 
 export const createRoomApi = async (roomId) => {
-  const respone = await httpClient.post(`/api/v1/rooms`, {roomId: roomId});
-  return respone.data;
+  try {
+  const response = await httpClient.post(`/api/v1/rooms`, {roomId});
+  return response.data;
+} catch (error) {
+  console.error(error.response?.data?.message || error.message);
+  throw error;
+}
 };
 
 export const joinChatApi = async (roomId) => {
