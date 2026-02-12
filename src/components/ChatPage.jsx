@@ -8,6 +8,7 @@ import toast from "react-hot-toast";
 import { baseURL } from "../config/AxiosHelper";
 import { getMessagess } from "../services/RoomServices";
 import { timeAgo } from "../config/helper";
+
 const ChatPage = () => {
   const {
     roomId,
@@ -17,11 +18,9 @@ const ChatPage = () => {
     setRoomId,
     setCurrentUser,
   } = useChatContext();
-  // console.log(roomId);
-  // console.log(currentUser);
-  // console.log(connected);
 
   const navigate = useNavigate();
+  
   useEffect(() => {
     if (!connected) {
       navigate("/");
@@ -34,24 +33,23 @@ const ChatPage = () => {
   const chatBoxRef = useRef(null);
   const [stompClient, setStompClient] = useState(null);
 
-  //page init:
-  //messages ko load karne honge
-
+  // Load messages
   useEffect(() => {
     async function loadMessages() {
       try {
         const messages = await getMessagess(roomId);
-        // console.log(messages);
+        console.log("Loaded messages:", messages);
         setMessages(messages);
-      } catch (error) {}
+      } catch (error) {
+        console.error("Error loading messages:", error);
+      }
     }
     if (connected) {
       loadMessages();
     }
-  }, []);
+  }, [roomId, connected]);
 
-  //scroll down
-
+  // Auto-scroll
   useEffect(() => {
     if (chatBoxRef.current) {
       chatBoxRef.current.scroll({
@@ -61,28 +59,24 @@ const ChatPage = () => {
     }
   }, [messages]);
 
-  //stompClient ko init karne honge
-  //subscribe
-
+  // WebSocket connection
   useEffect(() => {
     const connectWebSocket = () => {
-      ///SockJS
       const sock = new SockJS(`${baseURL}/chat`);
       const client = Stomp.over(sock);
 
       client.connect({}, () => {
         setStompClient(client);
-
-        toast.success("connected");
+        toast.success("Connected to chat");
 
         client.subscribe(`/topic/room/${roomId}`, (message) => {
-          console.log(message);
-
+          console.log("Received raw message:", message);
+          
           const newMessage = JSON.parse(message.body);
-
+          console.log("Parsed message:", newMessage);
+          
+          // FIX 1: Handle both timestamp and timeStamp fields
           setMessages((prev) => [...prev, newMessage]);
-
-          //rest of the work after success receiving the message
         });
       });
     };
@@ -91,14 +85,17 @@ const ChatPage = () => {
       connectWebSocket();
     }
 
-    //stomp client
-  }, [roomId]);
+    return () => {
+      if (stompClient) {
+        stompClient.disconnect();
+      }
+    };
+  }, [roomId, connected]);
 
-  //send message handle
-
+  // Send message
   const sendMessage = async () => {
     if (stompClient && connected && input.trim()) {
-      console.log(input);
+      console.log("Sending message:", input);
 
       const message = {
         sender: currentUser,
@@ -113,36 +110,38 @@ const ChatPage = () => {
       );
       setInput("");
     }
-
-    //
   };
 
   function handleLogout() {
-    stompClient.disconnect();
+    if (stompClient) {
+      stompClient.disconnect();
+    }
     setConnected(false);
     setRoomId("");
     setCurrentUser("");
     navigate("/");
   }
 
+  // FIX 2: Helper function to get timestamp safely
+  const getMessageTimestamp = (message) => {
+    // Try both timestamp and timeStamp fields
+    return message.timestamp || message.timeStamp || message.createdAt;
+  };
+
   return (
     <div className="">
-      {/* this is a header */}
-      <header className="dark:border-gray-700  fixed w-full dark:bg-gray-900 py-5 shadow flex justify-around items-center">
-        {/* room name container */}
+      {/* Header */}
+      <header className="dark:border-gray-700 fixed w-full dark:bg-gray-900 py-5 shadow flex justify-around items-center">
         <div>
           <h1 className="text-xl font-semibold">
             Room : <span>{roomId}</span>
           </h1>
         </div>
-        {/* username container */}
-
         <div>
           <h1 className="text-xl font-semibold">
             User : <span>{currentUser}</span>
           </h1>
         </div>
-        {/* button: leave room */}
         <div>
           <button
             onClick={handleLogout}
@@ -153,16 +152,17 @@ const ChatPage = () => {
         </div>
       </header>
 
+      {/* Messages */}
       <main
         ref={chatBoxRef}
-        className="py-20 px-10   w-2/3 dark:bg-slate-600 mx-auto h-screen overflow-auto "
+        className="py-20 px-10 w-2/3 dark:bg-slate-600 mx-auto h-screen overflow-auto"
       >
         {messages.map((message, index) => (
           <div
-            key={index}
+            key={message.id || index} // FIX 3: Use message.id if available
             className={`flex ${
               message.sender === currentUser ? "justify-end" : "justify-start"
-            } `}
+            }`}
           >
             <div
               className={`my-2 ${
@@ -173,13 +173,13 @@ const ChatPage = () => {
                 <img
                   className="h-10 w-10"
                   src={"https://avatar.iran.liara.run/public/43"}
-                  alt=""
+                  alt="avatar"
                 />
                 <div className="flex flex-col gap-1">
                   <p className="text-sm font-bold">{message.sender}</p>
                   <p>{message.content}</p>
                   <p className="text-xs text-gray-400">
-                    {timeAgo(message.timeStamp)}
+                    {timeAgo(getMessageTimestamp(message))} {/* FIX 4: Use helper function */}
                   </p>
                 </div>
               </div>
@@ -187,14 +187,13 @@ const ChatPage = () => {
           </div>
         ))}
       </main>
-      {/* input message container */}
-      <div className=" fixed bottom-4 w-full h-16 ">
-        <div className="h-full  pr-10 gap-4 flex items-center justify-between rounded-full w-1/2 mx-auto dark:bg-gray-900">
+
+      {/* Input */}
+      <div className="fixed bottom-4 w-full h-16">
+        <div className="h-full pr-10 gap-4 flex items-center justify-between rounded-full w-1/2 mx-auto dark:bg-gray-900">
           <input
             value={input}
-            onChange={(e) => {
-              setInput(e.target.value);
-            }}
+            onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 sendMessage();
@@ -202,16 +201,15 @@ const ChatPage = () => {
             }}
             type="text"
             placeholder="Type your message here..."
-            className=" w-full  dark:border-gray-600 b dark:bg-gray-800  px-5 py-2 rounded-full h-full focus:outline-none  "
+            className="w-full dark:border-gray-600 dark:bg-gray-800 px-5 py-2 rounded-full h-full focus:outline-none"
           />
-
           <div className="flex gap-1">
-            <button className="dark:bg-purple-600 h-10 w-10  flex   justify-center items-center rounded-full">
+            <button className="dark:bg-purple-600 h-10 w-10 flex justify-center items-center rounded-full">
               <MdAttachFile size={20} />
             </button>
             <button
               onClick={sendMessage}
-              className="dark:bg-green-600 h-10 w-10  flex   justify-center items-center rounded-full"
+              className="dark:bg-green-600 h-10 w-10 flex justify-center items-center rounded-full"
             >
               <MdSend size={20} />
             </button>
