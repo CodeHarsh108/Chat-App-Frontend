@@ -1,13 +1,13 @@
 import React, { useEffect, useRef, useState } from "react";
-import { MdAttachFile, MdSend } from "react-icons/md";
+import { MdAttachFile, MdSend, MdLogout } from "react-icons/md";
 import useChatContext from "../context/ChatContext";
 import { useNavigate } from "react-router";
 import SockJS from "sockjs-client";
 import { Stomp } from "@stomp/stompjs";
 import toast from "react-hot-toast";
-import { baseURL } from "../config/AxiosHelper";
-import { getMessagess } from "../services/RoomServices";
-import { timeAgo } from "../config/helper";
+import { baseURL, timeAgo } from "../config/AxiosHelper";
+import { getMessagesApi } from "../services/RoomServices";
+import { logoutApi, getAuthToken } from "../services/AuthServices";
 
 const ChatPage = () => {
   const {
@@ -22,14 +22,15 @@ const ChatPage = () => {
   const navigate = useNavigate();
   
   useEffect(() => {
-    if (!connected) {
-      navigate("/");
+    if (!connected || !currentUser || !roomId) {
+      navigate("/rooms");
     }
-  }, [connected, roomId, currentUser]);
+  }, [connected, currentUser, roomId, navigate]);
 
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
-  const inputRef = useRef(null);
+  const [loading, setLoading] = useState(true);
+  const [sending, setSending] = useState(false);
   const chatBoxRef = useRef(null);
   const [stompClient, setStompClient] = useState(null);
 
@@ -37,14 +38,18 @@ const ChatPage = () => {
   useEffect(() => {
     async function loadMessages() {
       try {
-        const messages = await getMessagess(roomId);
-        console.log("Loaded messages:", messages);
+        setLoading(true);
+        const messages = await getMessagesApi(roomId);
         setMessages(messages);
       } catch (error) {
         console.error("Error loading messages:", error);
+        toast.error("Failed to load messages");
+      } finally {
+        setLoading(false);
       }
     }
-    if (connected) {
+    
+    if (connected && roomId) {
       loadMessages();
     }
   }, [roomId, connected]);
@@ -60,55 +65,110 @@ const ChatPage = () => {
   }, [messages]);
 
   // WebSocket connection
-  useEffect(() => {
-    const connectWebSocket = () => {
-      const sock = new SockJS(`${baseURL}/chat`);
-      const client = Stomp.over(sock);
+ // In ChatPage.jsx - update the WebSocket connection useEffect
 
-      client.connect({}, () => {
+useEffect(() => {
+  const connectWebSocket = () => {
+    const token = getAuthToken();
+    
+    if (!token) {
+      toast.error("Not authenticated");
+      handleLogout();
+      return;
+    }
+
+    const sock = new SockJS(`${baseURL}/chat`);
+    const client = Stomp.over(sock);
+
+    // Disable logging in production
+    client.debug = () => {};
+
+    // IMPORTANT: Headers must be set exactly like this
+    const headers = {
+      'Authorization': `Bearer ${token}`
+    };
+
+    client.connect(headers, 
+      // Success callback
+      () => {
         setStompClient(client);
         toast.success("Connected to chat");
 
+        // Subscribe to room messages
         client.subscribe(`/topic/room/${roomId}`, (message) => {
-          console.log("Received raw message:", message);
-          
-          const newMessage = JSON.parse(message.body);
-          console.log("Parsed message:", newMessage);
-          
-          // FIX 1: Handle both timestamp and timeStamp fields
-          setMessages((prev) => [...prev, newMessage]);
+          try {
+            const newMessage = JSON.parse(message.body);
+            setMessages((prev) => [...prev, newMessage]);
+          } catch (e) {
+            console.error("Error parsing message:", e);
+          }
         });
-      });
-    };
 
-    if (connected) {
-      connectWebSocket();
-    }
-
-    return () => {
-      if (stompClient) {
-        stompClient.disconnect();
+        // Subscribe to user-specific errors
+        client.subscribe('/user/queue/errors', (error) => {
+          try {
+            const errorMsg = JSON.parse(error.body);
+            toast.error(errorMsg.message || "WebSocket error");
+          } catch {
+            toast.error(error.body || "WebSocket error");
+          }
+        });
+      }, 
+      // Error callback
+      (error) => {
+        console.error("WebSocket connection failed:", error);
+        
+        // Check if it's an auth error
+        if (error.headers && error.headers.message) {
+          if (error.headers.message.includes("Authentication")) {
+            toast.error("Authentication failed. Please login again.");
+            handleLogout();
+          } else {
+            toast.error("Connection lost. Reconnecting...");
+            // Retry after 3 seconds
+            setTimeout(connectWebSocket, 3000);
+          }
+        } else {
+          toast.error("Connection lost. Reconnecting...");
+          setTimeout(connectWebSocket, 3000);
+        }
       }
-    };
-  }, [roomId, connected]);
+    );
+  };
+
+  if (connected && roomId) {
+    connectWebSocket();
+  }
+
+  return () => {
+    if (stompClient) {
+      stompClient.disconnect();
+    }
+  };
+}, [roomId, connected]);
 
   // Send message
   const sendMessage = async () => {
-    if (stompClient && connected && input.trim()) {
-      console.log("Sending message:", input);
+    if (!stompClient || !connected || !input.trim() || sending) return;
 
-      const message = {
-        sender: currentUser,
-        content: input,
-        roomId: roomId,
-      };
+    setSending(true);
+    const message = {
+      content: input,
+      roomId: roomId
+      // sender is set from authenticated user on backend
+    };
 
+    try {
       stompClient.send(
         `/app/sendMessage/${roomId}`,
         {},
         JSON.stringify(message)
       );
       setInput("");
+    } catch (error) {
+      toast.error("Failed to send message");
+    } finally {
+      setSending(false);
     }
   };
 
@@ -116,38 +176,48 @@ const ChatPage = () => {
     if (stompClient) {
       stompClient.disconnect();
     }
+    logoutApi();
     setConnected(false);
     setRoomId("");
     setCurrentUser("");
     navigate("/");
+    toast.success("Logged out");
   }
 
-  // FIX 2: Helper function to get timestamp safely
   const getMessageTimestamp = (message) => {
-    // Try both timestamp and timeStamp fields
     return message.timestamp || message.timeStamp || message.createdAt;
   };
 
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-900">
+        <div className="text-white/50 animate-pulse">Loading messages...</div>
+      </div>
+    );
+  }
+
   return (
-    <div className="">
+    <div className="h-screen flex flex-col bg-gray-900">
       {/* Header */}
-      <header className="dark:border-gray-700 fixed w-full dark:bg-gray-900 py-5 shadow flex justify-around items-center">
-        <div>
-          <h1 className="text-xl font-semibold">
-            Room : <span>{roomId}</span>
+      <header className="bg-gray-800/90 backdrop-blur-sm border-b border-white/10 py-4 px-6 flex justify-between items-center shadow-lg">
+        <div className="flex items-center gap-4">
+          <h1 className="text-xl font-semibold text-white/90">
+            Room: <span className="text-[#FF9FFC]">{roomId}</span>
           </h1>
         </div>
-        <div>
-          <h1 className="text-xl font-semibold">
-            User : <span>{currentUser}</span>
-          </h1>
-        </div>
-        <div>
+        
+        <div className="flex items-center gap-6">
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+            <span className="text-white/70 text-sm">{currentUser}</span>
+          </div>
+          
           <button
             onClick={handleLogout}
-            className="dark:bg-red-500 dark:hover:bg-red-700 px-3 py-2 rounded-full"
+            className="flex items-center gap-2 px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-white/70 hover:text-white/90 transition-all duration-200"
           >
-            Leave Room
+            <MdLogout size={18} />
+            <span className="text-sm">Leave</span>
           </button>
         </div>
       </header>
@@ -155,61 +225,72 @@ const ChatPage = () => {
       {/* Messages */}
       <main
         ref={chatBoxRef}
-        className="py-20 px-10 w-2/3 dark:bg-slate-600 mx-auto h-screen overflow-auto"
+        className="flex-1 overflow-y-auto px-4 md:px-8 py-6 space-y-4"
+        style={{
+          background: 'radial-gradient(circle at 20% 20%, rgba(82, 39, 255, 0.05) 0%, transparent 50%), radial-gradient(circle at 80% 80%, rgba(255, 159, 252, 0.05) 0%, transparent 50%)'
+        }}
       >
-        {messages.map((message, index) => (
-          <div
-            key={message.id || index} // FIX 3: Use message.id if available
-            className={`flex ${
-              message.sender === currentUser ? "justify-end" : "justify-start"
-            }`}
-          >
-            <div
-              className={`my-2 ${
-                message.sender === currentUser ? "bg-green-800" : "bg-gray-800"
-              } p-2 max-w-xs rounded`}
-            >
-              <div className="flex flex-row gap-2">
-                <img
-                  className="h-10 w-10"
-                  src={"https://avatar.iran.liara.run/public/43"}
-                  alt="avatar"
-                />
-                <div className="flex flex-col gap-1">
-                  <p className="text-sm font-bold">{message.sender}</p>
-                  <p>{message.content}</p>
-                  <p className="text-xs text-gray-400">
-                    {timeAgo(getMessageTimestamp(message))} {/* FIX 4: Use helper function */}
-                  </p>
-                </div>
-              </div>
+        {messages.length === 0 ? (
+          <div className="h-full flex items-center justify-center">
+            <div className="text-center">
+              <p className="text-white/30 text-lg">No messages yet</p>
+              <p className="text-white/20 text-sm mt-2">Be the first to send a message!</p>
             </div>
           </div>
-        ))}
+        ) : (
+          messages.map((message, index) => (
+            <div
+              key={message.id || index}
+              className={`flex ${message.sender === currentUser ? "justify-end" : "justify-start"} animate-fadeIn`}
+            >
+              <div
+                className={`max-w-[70%] md:max-w-[50%] rounded-2xl p-4 ${
+                  message.sender === currentUser
+                    ? "bg-gradient-to-r from-[#5227FF] to-[#FF9FFC] text-white"
+                    : "bg-white/10 text-white/90 border border-white/10"
+                }`}
+              >
+                {message.sender !== currentUser && (
+                  <p className="text-xs text-white/50 mb-1">{message.sender}</p>
+                )}
+                <p className="break-words">{message.content}</p>
+                <p className="text-xs text-white/50 mt-1 text-right">
+                  {timeAgo(getMessageTimestamp(message))}
+                </p>
+              </div>
+            </div>
+          ))
+        )}
       </main>
 
       {/* Input */}
-      <div className="fixed bottom-4 w-full h-16">
-        <div className="h-full pr-10 gap-4 flex items-center justify-between rounded-full w-1/2 mx-auto dark:bg-gray-900">
-          <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                sendMessage();
-              }
-            }}
-            type="text"
-            placeholder="Type your message here..."
-            className="w-full dark:border-gray-600 dark:bg-gray-800 px-5 py-2 rounded-full h-full focus:outline-none"
-          />
-          <div className="flex gap-1">
-            <button className="dark:bg-purple-600 h-10 w-10 flex justify-center items-center rounded-full">
+      <div className="bg-gray-800/90 backdrop-blur-sm border-t border-white/10 p-4">
+        <div className="max-w-4xl mx-auto flex items-center gap-3">
+          <div className="relative flex-1 group">
+            <div className="absolute -inset-0.5 bg-gradient-to-r from-[#5227FF] to-[#FF9FFC] rounded-full opacity-0 group-focus-within:opacity-50 blur-md transition-all duration-300"></div>
+            <input
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && sendMessage()}
+              type="text"
+              placeholder="Type your message..."
+              disabled={sending}
+              className="relative w-full bg-white/5 px-6 py-3 rounded-full text-white/90 placeholder-white/30 focus:outline-none border border-white/10 focus:border-transparent transition-all duration-200 disabled:opacity-50"
+            />
+          </div>
+          
+          <div className="flex gap-2">
+            <button 
+              className="p-3 bg-white/5 hover:bg-white/10 rounded-full text-white/70 hover:text-white/90 transition-all duration-200 disabled:opacity-50"
+              disabled
+              title="File upload coming soon"
+            >
               <MdAttachFile size={20} />
             </button>
             <button
               onClick={sendMessage}
-              className="dark:bg-green-600 h-10 w-10 flex justify-center items-center rounded-full"
+              disabled={!input.trim() || sending}
+              className="p-3 bg-gradient-to-r from-[#5227FF] to-[#FF9FFC] rounded-full text-white disabled:opacity-50 disabled:cursor-not-allowed hover:shadow-lg transition-all duration-200"
             >
               <MdSend size={20} />
             </button>
