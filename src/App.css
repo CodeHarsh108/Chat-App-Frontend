@@ -15,3 +15,40 @@
 .animate-fadeIn {
   animation: fadeIn 0.3s ease-out forwards;
 }
+
+/* Typing indicator animation */
+@keyframes typingPulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+
+.typing-indicator {
+  display: inline-flex;
+  gap: 4px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 20px;
+  margin-left: 10px;
+}
+
+.typing-dot {
+  width: 6px;
+  height: 6px;
+  background: #FF9FFC;
+  border-radius: 50%;
+  animation: typingPulse 1.4s infinite;
+}
+
+.typing-dot:nth-child(2) { animation-delay: 0.2s; }
+.typing-dot:nth-child(3) { animation-delay: 0.4s; }
+
+/* Online user avatar animation */
+@keyframes onlinePulse {
+  0% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.4); }
+  70% { box-shadow: 0 0 0 6px rgba(74, 222, 128, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0); }
+}
+
+.online-badge {
+  animation: onlinePulse 2s infinite;
+}

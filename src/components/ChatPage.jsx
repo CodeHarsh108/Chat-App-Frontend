@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { MdAttachFile, MdSend, MdLogout } from "react-icons/md";
+import { MdAttachFile, MdSend, MdLogout, MdImage, MdVideoLibrary, MdAudiotrack, MdDescription, MdDownload } from "react-icons/md";
 import useChatContext from "../context/ChatContext";
 import { useNavigate } from "react-router";
 import SockJS from "sockjs-client";
@@ -8,6 +8,9 @@ import toast from "react-hot-toast";
 import { baseURL, timeAgo } from "../config/AxiosHelper";
 import { getMessagesApi } from "../services/RoomServices";
 import { logoutApi, getAuthToken } from "../services/AuthServices";
+import AttachmentModal from "../config/AttachmentModal";
+import { getFileUrl, formatFileSize, sendAttachmentMessageApi } from "../services/AttachmentServices";
+
 
 const ChatPage = () => {
   const {
@@ -33,6 +36,15 @@ const ChatPage = () => {
   const [sending, setSending] = useState(false);
   const chatBoxRef = useRef(null);
   const [stompClient, setStompClient] = useState(null);
+  
+  // Attachment states
+  const [showAttachmentModal, setShowAttachmentModal] = useState(false);
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
+  
+  // User status states
+  const [onlineUsers, setOnlineUsers] = useState([]);
+  const [typingUsers, setTypingUsers] = useState([]);
+  const typingTimeoutRef = useRef(null);
 
   // Load messages
   useEffect(() => {
@@ -40,7 +52,9 @@ const ChatPage = () => {
       try {
         setLoading(true);
         const messages = await getMessagesApi(roomId);
-        setMessages(messages);
+        // FIX: Messages come from backend in DESC order (newest first)
+        // We need to reverse them for display (oldest first at top, newest at bottom)
+        setMessages(messages.reverse());
       } catch (error) {
         console.error("Error loading messages:", error);
         toast.error("Failed to load messages");
@@ -54,57 +68,78 @@ const ChatPage = () => {
     }
   }, [roomId, connected]);
 
-  // Auto-scroll
+  // Auto-scroll to bottom on new messages
   useEffect(() => {
     if (chatBoxRef.current) {
-      chatBoxRef.current.scroll({
-        top: chatBoxRef.current.scrollHeight,
-        behavior: "smooth",
-      });
+      chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
     }
   }, [messages]);
 
   // WebSocket connection
- // In ChatPage.jsx - update the WebSocket connection useEffect
+  useEffect(() => {
+    const connectWebSocket = () => {
+      const token = getAuthToken();
+      
+      if (!token) {
+        toast.error("Not authenticated");
+        handleLogout();
+        return;
+      }
 
-useEffect(() => {
-  const connectWebSocket = () => {
-    const token = getAuthToken();
-    
-    if (!token) {
-      toast.error("Not authenticated");
-      handleLogout();
-      return;
-    }
+      const sock = new SockJS(`${baseURL}/chat`);
+      const client = Stomp.over(sock);
+      client.debug = () => {};
 
-    const sock = new SockJS(`${baseURL}/chat`);
-    const client = Stomp.over(sock);
+      const headers = {
+        'Authorization': `Bearer ${token}`
+      };
 
-    // Disable logging in production
-    client.debug = () => {};
-
-    // IMPORTANT: Headers must be set exactly like this
-    const headers = {
-      'Authorization': `Bearer ${token}`
-    };
-
-    client.connect(headers, 
-      // Success callback
-      () => {
+      client.connect(headers, () => {
         setStompClient(client);
         toast.success("Connected to chat");
 
         // Subscribe to room messages
         client.subscribe(`/topic/room/${roomId}`, (message) => {
-          try {
-            const newMessage = JSON.parse(message.body);
-            setMessages((prev) => [...prev, newMessage]);
-          } catch (e) {
-            console.error("Error parsing message:", e);
+          const newMessage = JSON.parse(message.body);
+          // FIX: Add new message to the END of array (bottom of chat)
+          setMessages((prev) => [...prev, newMessage]);
+        });
+
+        // Subscribe to user status updates
+        client.subscribe(`/topic/room/${roomId}/status`, (message) => {
+          const status = JSON.parse(message.body);
+          if (status.type === "USER_JOINED") {
+            toast.success(`${status.username} joined the room`);
+          } else if (status.type === "USER_LEFT") {
+            toast(`${status.username} left the room`);
           }
         });
 
-        // Subscribe to user-specific errors
+        // Subscribe to online users list
+        client.subscribe(`/topic/room/${roomId}/users`, (message) => {
+          const data = JSON.parse(message.body);
+          setOnlineUsers(data.users || []);
+        });
+
+        // Subscribe to typing indicators
+        client.subscribe(`/topic/room/${roomId}/typing`, (message) => {
+          const typingData = JSON.parse(message.body);
+          
+          if (typingData.type === "TYPING_START") {
+            setTypingUsers((prev) => {
+              if (!prev.includes(typingData.username)) {
+                return [...prev, typingData.username];
+              }
+              return prev;
+            });
+          } else if (typingData.type === "TYPING_STOP") {
+            setTypingUsers((prev) => 
+              prev.filter(u => u !== typingData.username)
+            );
+          }
+        });
+
+        // Subscribe to errors
         client.subscribe('/user/queue/errors', (error) => {
           try {
             const errorMsg = JSON.parse(error.body);
@@ -113,41 +148,45 @@ useEffect(() => {
             toast.error(error.body || "WebSocket error");
           }
         });
-      }, 
-      // Error callback
-      (error) => {
+
+        // Announce join
+        client.send(`/app/join/${roomId}`, {}, {});
+
+      }, (error) => {
         console.error("WebSocket connection failed:", error);
-        
-        // Check if it's an auth error
-        if (error.headers && error.headers.message) {
-          if (error.headers.message.includes("Authentication")) {
-            toast.error("Authentication failed. Please login again.");
-            handleLogout();
-          } else {
-            toast.error("Connection lost. Reconnecting...");
-            // Retry after 3 seconds
-            setTimeout(connectWebSocket, 3000);
-          }
-        } else {
-          toast.error("Connection lost. Reconnecting...");
-          setTimeout(connectWebSocket, 3000);
-        }
-      }
-    );
-  };
+        toast.error("Connection lost. Reconnecting...");
+        setTimeout(connectWebSocket, 3000);
+      });
+    };
 
-  if (connected && roomId) {
-    connectWebSocket();
-  }
-
-  return () => {
-    if (stompClient) {
-      stompClient.disconnect();
+    if (connected && roomId) {
+      connectWebSocket();
     }
-  };
-}, [roomId, connected]);
 
-  // Send message
+    return () => {
+      if (stompClient && stompClient.connected) {
+        stompClient.send(`/app/leave/${roomId}`, {}, {});
+        stompClient.disconnect();
+      }
+    };
+  }, [roomId, connected]);
+
+  // Handle typing indicator
+  const handleTyping = () => {
+    if (!stompClient || !connected || !input.trim()) return;
+
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+
+    stompClient.send(`/app/typing/start/${roomId}`, {}, {});
+
+    typingTimeoutRef.current = setTimeout(() => {
+      stompClient.send(`/app/typing/stop/${roomId}`, {}, {});
+    }, 3000);
+  };
+
+  // Send text message
   const sendMessage = async () => {
     if (!stompClient || !connected || !input.trim() || sending) return;
 
@@ -155,7 +194,6 @@ useEffect(() => {
     const message = {
       content: input,
       roomId: roomId
-      // sender is set from authenticated user on backend
     };
 
     try {
@@ -165,6 +203,12 @@ useEffect(() => {
         JSON.stringify(message)
       );
       setInput("");
+      
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+        stompClient.send(`/app/typing/stop/${roomId}`, {}, {});
+      }
+      
     } catch (error) {
       toast.error("Failed to send message");
     } finally {
@@ -172,8 +216,58 @@ useEffect(() => {
     }
   };
 
+const handleAttachmentSelect = async (attachmentData) => {
+  setUploadingAttachment(false);
+  setShowAttachmentModal(false);
+  
+  console.log('Attachment selected:', attachmentData);
+  console.log('Current input text:', input); // DEBUG: See what text is being sent
+  
+  try {
+    const toastId = toast.loading('Sending attachment...');
+    
+    // 🔥 CRITICAL FIX: Use the CURRENT input value
+    const messageContent = input; // This captures whatever is in the text box
+    
+    console.log('Sending with text:', messageContent); // DEBUG
+    
+    const response = await sendAttachmentMessageApi(
+      attachmentData.attachmentId,
+      roomId,
+      messageContent // Send the text!
+    );
+    
+    console.log('Attachment message sent:', response);
+    
+    // Clear input AFTER sending
+    setInput("");
+    toast.dismiss(toastId);
+    toast.success('Attachment sent!');
+    
+  } catch (error) {
+    console.error('Failed to send attachment message:', error);
+    toast.error(error.response?.data?.error || 'Failed to send attachment');
+  }
+};
+
+
+
+
+  // Handle attachment button click
+  const handleAttachmentClick = () => {
+    setShowAttachmentModal(true);
+    setUploadingAttachment(true);
+  };
+
+  const handleInputChange = (e) => {
+  setInput(e.target.value);
+  console.log('Input changed:', e.target.value); // DEBUG
+  handleTyping();
+};
+
   function handleLogout() {
-    if (stompClient) {
+    if (stompClient && stompClient.connected) {
+      stompClient.send(`/app/leave/${roomId}`, {}, {});
       stompClient.disconnect();
     }
     logoutApi();
@@ -188,6 +282,139 @@ useEffect(() => {
     return message.timestamp || message.timeStamp || message.createdAt;
   };
 
+  const renderMessage = (message) => {
+    console.log('RENDER MESSAGE - Full message object:', JSON.stringify(message, null, 2));
+
+    if (message.hasAttachment) {
+        // Image attachment
+        if (message.attachmentType === 'image') {
+            const imageUrl = getFileUrl(message.attachmentUrl);
+            
+            return (
+                <div className="space-y-2">
+                    {/* 🔥 FIX: Show text if present, regardless of whether it starts with 📎 */}
+                    {message.content && (
+                        <p className="mb-2 whitespace-pre-wrap break-words">{message.content}</p>
+                    )}
+                    <div className="relative group">
+                        {imageUrl ? (
+                            <img
+                                src={imageUrl}
+                                alt={message.attachmentName || 'Image'}
+                                className="max-w-full max-h-64 rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
+                                onClick={() => window.open(imageUrl, '_blank')}
+                                onLoad={() => console.log('Image loaded successfully:', imageUrl)}
+                                onError={(e) => {
+                                    console.error('Image failed to load:', imageUrl);
+                                    e.target.onerror = null;
+                                    e.target.src = 'https://via.placeholder.com/200x200?text=Image+Error';
+                                }}
+                            />
+                        ) : (
+                            <div className="w-64 h-48 bg-gray-700 rounded-lg flex items-center justify-center">
+                                <p className="text-white/50">Image URL not available</p>
+                            </div>
+                        )}
+                        <a
+                            href={imageUrl}
+                            download
+                            className="absolute top-2 right-2 p-2 bg-black/50 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                            onClick={(e) => e.stopPropagation()}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                        >
+                            <MdDownload size={16} />
+                        </a>
+                    </div>
+                    <p className="text-xs text-white/50 mt-1">
+                        {message.attachmentName} • {formatFileSize(message.attachmentSize)}
+                    </p>
+                </div>
+            );
+        }
+        
+        // Video attachment
+        if (message.attachmentType === 'video') {
+            const videoUrl = getFileUrl(message.attachmentUrl);
+            
+            return (
+                <div className="space-y-2">
+                    {message.content && (
+                        <p className="mb-2 whitespace-pre-wrap break-words">{message.content}</p>
+                    )}
+                    <video
+                        src={videoUrl}
+                        controls
+                        className="max-w-full max-h-64 rounded-lg"
+                        onError={(e) => console.error('Video failed to load:', videoUrl)}
+                    >
+                        Your browser does not support the video tag.
+                    </video>
+                    <p className="text-xs text-white/50 mt-1">
+                        {message.attachmentName} • {formatFileSize(message.attachmentSize)}
+                    </p>
+                </div>
+            );
+        }
+        
+        // Audio attachment
+        if (message.attachmentType === 'audio') {
+            const audioUrl = getFileUrl(message.attachmentUrl);
+            return (
+                <div className="space-y-2">
+                    {message.content && (
+                        <p className="mb-2 whitespace-pre-wrap break-words">{message.content}</p>
+                    )}
+                    <audio
+                        src={audioUrl}
+                        controls
+                        className="w-full"
+                        onError={(e) => console.error('Audio failed to load:', audioUrl)}
+                    >
+                        Your browser does not support the audio tag.
+                    </audio>
+                    <p className="text-xs text-white/50 mt-1">
+                        {message.attachmentName} • {formatFileSize(message.attachmentSize)}
+                    </p>
+                </div>
+            );
+        }
+        
+        // Document attachment
+        if (message.attachmentType === 'document') {
+            const docUrl = getFileUrl(message.attachmentUrl);
+            return (
+                <div className="space-y-2">
+                    {message.content && (
+                        <p className="mb-2 whitespace-pre-wrap break-words">{message.content}</p>
+                    )}
+                    <a
+                        href={docUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-3 p-3 bg-white/5 rounded-lg hover:bg-white/10 transition-colors"
+                        onClick={() => console.log('Opening document:', docUrl)}
+                    >
+                        <MdDescription size={24} className="text-blue-400" />
+                        <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium truncate">{message.attachmentName}</p>
+                            <p className="text-xs text-white/50">{formatFileSize(message.attachmentSize)}</p>
+                        </div>
+                        <MdDownload size={20} className="text-white/50 flex-shrink-0" />
+                    </a>
+                </div>
+            );
+        }
+    }
+    
+    // Text message
+    return <p className="break-words whitespace-pre-wrap">{message.content}</p>;
+};
+
+
+
+  const otherTypingUsers = typingUsers.filter(u => u !== currentUser);
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-900">
@@ -199,30 +426,63 @@ useEffect(() => {
   return (
     <div className="h-screen flex flex-col bg-gray-900">
       {/* Header */}
-      <header className="bg-gray-800/90 backdrop-blur-sm border-b border-white/10 py-4 px-6 flex justify-between items-center shadow-lg">
-        <div className="flex items-center gap-4">
-          <h1 className="text-xl font-semibold text-white/90">
-            Room: <span className="text-[#FF9FFC]">{roomId}</span>
-          </h1>
-        </div>
-        
-        <div className="flex items-center gap-6">
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-            <span className="text-white/70 text-sm">{currentUser}</span>
+      <header className="bg-gray-800/90 backdrop-blur-sm border-b border-white/10 py-2 px-6 shadow-lg flex-shrink-0">
+        <div className="flex justify-between items-center">
+          <div className="flex items-center gap-4">
+            <h1 className="text-xl font-semibold text-white/90">
+              Room: <span className="text-[#FF9FFC]">{roomId}</span>
+            </h1>
+            
+            <div className="flex items-center gap-1 bg-green-500/10 px-3 py-1 rounded-full">
+              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+              <span className="text-white/70 text-sm">{onlineUsers.length} online</span>
+            </div>
           </div>
           
-          <button
-            onClick={handleLogout}
-            className="flex items-center gap-2 px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-white/70 hover:text-white/90 transition-all duration-200"
-          >
-            <MdLogout size={18} />
-            <span className="text-sm">Leave</span>
-          </button>
+          <div className="flex items-center gap-6">
+            <div className="flex -space-x-2">
+              {onlineUsers.slice(0, 5).map((user, idx) => (
+                <div
+                  key={idx}
+                  className="w-8 h-8 rounded-full bg-gradient-to-r from-[#5227FF] to-[#FF9FFC] flex items-center justify-center text-white text-xs font-bold border-2 border-gray-800"
+                  title={user}
+                >
+                  {user.charAt(0).toUpperCase()}
+                </div>
+              ))}
+              {onlineUsers.length > 5 && (
+                <div className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center text-white text-xs border-2 border-gray-800">
+                  +{onlineUsers.length - 5}
+                </div>
+              )}
+            </div>
+            
+            <div className="flex items-center gap-2">
+              <span className="text-white/70 text-sm">{currentUser}</span>
+              <button
+                onClick={handleLogout}
+                className="flex items-center gap-2 px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-white/70 hover:text-white/90 transition-all duration-200"
+              >
+                <MdLogout size={18} />
+                <span className="text-sm">Leave</span>
+              </button>
+            </div>
+          </div>
         </div>
+
+        {/* Typing indicator */}
+        {otherTypingUsers.length > 0 && (
+          <div className="text-white/50 text-sm italic mt-1 animate-pulse">
+            {otherTypingUsers.length === 1 
+              ? `${otherTypingUsers[0]} is typing...`
+              : otherTypingUsers.length === 2
+              ? `${otherTypingUsers[0]} and ${otherTypingUsers[1]} are typing...`
+              : `${otherTypingUsers.length} people are typing...`}
+          </div>
+        )}
       </header>
 
-      {/* Messages */}
+      {/* Messages - FIXED: Now displays in correct order (oldest top, newest bottom) */}
       <main
         ref={chatBoxRef}
         className="flex-1 overflow-y-auto px-4 md:px-8 py-6 space-y-4"
@@ -251,10 +511,15 @@ useEffect(() => {
                 }`}
               >
                 {message.sender !== currentUser && (
-                  <p className="text-xs text-white/50 mb-1">{message.sender}</p>
+                  <p className="text-xs text-white/50 mb-1 flex items-center gap-1">
+                    <span className="w-2 h-2 bg-green-500 rounded-full"></span>
+                    {message.sender}
+                  </p>
                 )}
-                <p className="break-words">{message.content}</p>
-                <p className="text-xs text-white/50 mt-1 text-right">
+                
+                {renderMessage(message)}
+                
+                <p className="text-xs text-white/50 mt-2 text-right">
                   {timeAgo(getMessageTimestamp(message))}
                 </p>
               </div>
@@ -264,26 +529,27 @@ useEffect(() => {
       </main>
 
       {/* Input */}
-      <div className="bg-gray-800/90 backdrop-blur-sm border-t border-white/10 p-4">
+      <div className="bg-gray-800/90 backdrop-blur-sm border-t border-white/10 p-4 flex-shrink-0">
         <div className="max-w-4xl mx-auto flex items-center gap-3">
           <div className="relative flex-1 group">
             <div className="absolute -inset-0.5 bg-gradient-to-r from-[#5227FF] to-[#FF9FFC] rounded-full opacity-0 group-focus-within:opacity-50 blur-md transition-all duration-300"></div>
             <input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && sendMessage()}
-              type="text"
-              placeholder="Type your message..."
-              disabled={sending}
-              className="relative w-full bg-white/5 px-6 py-3 rounded-full text-white/90 placeholder-white/30 focus:outline-none border border-white/10 focus:border-transparent transition-all duration-200 disabled:opacity-50"
-            />
+  value={input}
+  onChange={handleInputChange} // Use this instead of inline function
+  onKeyDown={(e) => e.key === "Enter" && sendMessage()}
+  type="text"
+  placeholder="Type your message..."
+  disabled={sending || uploadingAttachment}
+  className="relative w-full bg-white/5 px-6 py-3 rounded-full text-white/90 placeholder-white/30 focus:outline-none border border-white/10 focus:border-transparent transition-all duration-200 disabled:opacity-50"
+/>
           </div>
           
           <div className="flex gap-2">
             <button 
+              onClick={handleAttachmentClick}
+              disabled={uploadingAttachment}
               className="p-3 bg-white/5 hover:bg-white/10 rounded-full text-white/70 hover:text-white/90 transition-all duration-200 disabled:opacity-50"
-              disabled
-              title="File upload coming soon"
+              title="Attach file"
             >
               <MdAttachFile size={20} />
             </button>
@@ -297,6 +563,17 @@ useEffect(() => {
           </div>
         </div>
       </div>
+
+      {/* Attachment Modal */}
+      <AttachmentModal
+        isOpen={showAttachmentModal}
+        onClose={() => {
+          setShowAttachmentModal(false);
+          setUploadingAttachment(false);
+        }}
+        onAttachmentSelect={handleAttachmentSelect}
+        roomId={roomId}
+      />
     </div>
   );
 };
