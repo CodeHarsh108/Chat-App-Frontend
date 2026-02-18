@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { MdAttachFile, MdSend, MdLogout, MdImage, MdVideoLibrary, MdAudiotrack, MdDescription, MdDownload } from "react-icons/md";
+import { MdAttachFile, MdSend, MdLogout, MdImage, MdVideoLibrary, MdAudiotrack, MdDescription, MdDownload, MdDone, MdDoneAll } from "react-icons/md";
 import useChatContext from "../context/ChatContext";
 import { useNavigate } from "react-router";
 import SockJS from "sockjs-client";
@@ -10,7 +10,7 @@ import { getMessagesApi } from "../services/RoomServices";
 import { logoutApi, getAuthToken } from "../services/AuthServices";
 import AttachmentModal from "../config/AttachmentModal";
 import { getFileUrl, formatFileSize, sendAttachmentMessageApi } from "../services/AttachmentServices";
-
+import { useReadReceipts } from "../hooks/useReadReceipts";
 
 const ChatPage = () => {
   const {
@@ -46,14 +46,21 @@ const ChatPage = () => {
   const [typingUsers, setTypingUsers] = useState([]);
   const typingTimeoutRef = useRef(null);
 
+  // 🔥 NEW: Read receipts hook
+  const { getStatusIcon, getStatusColor } = useReadReceipts(
+    stompClient, 
+    roomId, 
+    currentUser, 
+    messages, 
+    chatBoxRef
+  );
+
   // Load messages
   useEffect(() => {
     async function loadMessages() {
       try {
         setLoading(true);
         const messages = await getMessagesApi(roomId);
-        // FIX: Messages come from backend in DESC order (newest first)
-        // We need to reverse them for display (oldest first at top, newest at bottom)
         setMessages(messages.reverse());
       } catch (error) {
         console.error("Error loading messages:", error);
@@ -101,8 +108,21 @@ const ChatPage = () => {
         // Subscribe to room messages
         client.subscribe(`/topic/room/${roomId}`, (message) => {
           const newMessage = JSON.parse(message.body);
-          // FIX: Add new message to the END of array (bottom of chat)
           setMessages((prev) => [...prev, newMessage]);
+        });
+
+        // Subscribe to read receipts
+        client.subscribe(`/topic/room/${roomId}/receipts`, (receipt) => {
+          const data = JSON.parse(receipt.body);
+          console.log('Receipt received:', data);
+          
+          // Update message status in UI
+          setMessages(prev => prev.map(msg => {
+            if (msg.id === data.messageId) {
+              return { ...msg, status: data.status, readBy: data.readBy };
+            }
+            return msg;
+          }));
         });
 
         // Subscribe to user status updates
@@ -216,54 +236,42 @@ const ChatPage = () => {
     }
   };
 
-const handleAttachmentSelect = async (attachmentData) => {
-  setUploadingAttachment(false);
-  setShowAttachmentModal(false);
-  
-  console.log('Attachment selected:', attachmentData);
-  console.log('Current input text:', input); // DEBUG: See what text is being sent
-  
-  try {
-    const toastId = toast.loading('Sending attachment...');
+  const handleAttachmentSelect = async (attachmentData) => {
+    setUploadingAttachment(false);
+    setShowAttachmentModal(false);
     
-    // 🔥 CRITICAL FIX: Use the CURRENT input value
-    const messageContent = input; // This captures whatever is in the text box
+    console.log('Attachment selected:', attachmentData);
+    console.log('Current input text:', input);
     
-    console.log('Sending with text:', messageContent); // DEBUG
-    
-    const response = await sendAttachmentMessageApi(
-      attachmentData.attachmentId,
-      roomId,
-      messageContent // Send the text!
-    );
-    
-    console.log('Attachment message sent:', response);
-    
-    // Clear input AFTER sending
-    setInput("");
-    toast.dismiss(toastId);
-    toast.success('Attachment sent!');
-    
-  } catch (error) {
-    console.error('Failed to send attachment message:', error);
-    toast.error(error.response?.data?.error || 'Failed to send attachment');
-  }
-};
+    try {
+      const toastId = toast.loading('Sending attachment...');
+      
+      const messageContent = input;
+      
+      console.log('Sending with text:', messageContent);
+      
+      const response = await sendAttachmentMessageApi(
+        attachmentData.attachmentId,
+        roomId,
+        messageContent
+      );
+      
+      console.log('Attachment message sent:', response);
+      
+      setInput("");
+      toast.dismiss(toastId);
+      toast.success('Attachment sent!');
+      
+    } catch (error) {
+      console.error('Failed to send attachment message:', error);
+      toast.error(error.response?.data?.error || 'Failed to send attachment');
+    }
+  };
 
-
-
-
-  // Handle attachment button click
   const handleAttachmentClick = () => {
     setShowAttachmentModal(true);
     setUploadingAttachment(true);
   };
-
-  const handleInputChange = (e) => {
-  setInput(e.target.value);
-  console.log('Input changed:', e.target.value); // DEBUG
-  handleTyping();
-};
 
   function handleLogout() {
     if (stompClient && stompClient.connected) {
@@ -283,135 +291,126 @@ const handleAttachmentSelect = async (attachmentData) => {
   };
 
   const renderMessage = (message) => {
-    console.log('RENDER MESSAGE - Full message object:', JSON.stringify(message, null, 2));
+    console.log('RENDER MESSAGE:', message);
 
     if (message.hasAttachment) {
-        // Image attachment
-        if (message.attachmentType === 'image') {
-            const imageUrl = getFileUrl(message.attachmentUrl);
-            
-            return (
-                <div className="space-y-2">
-                    {/* 🔥 FIX: Show text if present, regardless of whether it starts with 📎 */}
-                    {message.content && (
-                        <p className="mb-2 whitespace-pre-wrap break-words">{message.content}</p>
-                    )}
-                    <div className="relative group">
-                        {imageUrl ? (
-                            <img
-                                src={imageUrl}
-                                alt={message.attachmentName || 'Image'}
-                                className="max-w-full max-h-64 rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
-                                onClick={() => window.open(imageUrl, '_blank')}
-                                onLoad={() => console.log('Image loaded successfully:', imageUrl)}
-                                onError={(e) => {
-                                    console.error('Image failed to load:', imageUrl);
-                                    e.target.onerror = null;
-                                    e.target.src = 'https://via.placeholder.com/200x200?text=Image+Error';
-                                }}
-                            />
-                        ) : (
-                            <div className="w-64 h-48 bg-gray-700 rounded-lg flex items-center justify-center">
-                                <p className="text-white/50">Image URL not available</p>
-                            </div>
-                        )}
-                        <a
-                            href={imageUrl}
-                            download
-                            className="absolute top-2 right-2 p-2 bg-black/50 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
-                            onClick={(e) => e.stopPropagation()}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                        >
-                            <MdDownload size={16} />
-                        </a>
-                    </div>
-                    <p className="text-xs text-white/50 mt-1">
-                        {message.attachmentName} • {formatFileSize(message.attachmentSize)}
-                    </p>
-                </div>
-            );
-        }
+      if (message.attachmentType === 'image') {
+        const imageUrl = getFileUrl(message.attachmentUrl);
         
-        // Video attachment
-        if (message.attachmentType === 'video') {
-            const videoUrl = getFileUrl(message.attachmentUrl);
-            
-            return (
-                <div className="space-y-2">
-                    {message.content && (
-                        <p className="mb-2 whitespace-pre-wrap break-words">{message.content}</p>
-                    )}
-                    <video
-                        src={videoUrl}
-                        controls
-                        className="max-w-full max-h-64 rounded-lg"
-                        onError={(e) => console.error('Video failed to load:', videoUrl)}
-                    >
-                        Your browser does not support the video tag.
-                    </video>
-                    <p className="text-xs text-white/50 mt-1">
-                        {message.attachmentName} • {formatFileSize(message.attachmentSize)}
-                    </p>
+        return (
+          <div className="space-y-2">
+            {message.content && (
+              <p className="mb-2 whitespace-pre-wrap break-words">{message.content}</p>
+            )}
+            <div className="relative group">
+              {imageUrl ? (
+                <img
+                  src={imageUrl}
+                  alt={message.attachmentName || 'Image'}
+                  className="max-w-full max-h-64 rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
+                  onClick={() => window.open(imageUrl, '_blank')}
+                  onError={(e) => {
+                    console.error('Image failed to load:', imageUrl);
+                    e.target.onerror = null;
+                    e.target.src = 'https://via.placeholder.com/200x200?text=Image+Error';
+                  }}
+                />
+              ) : (
+                <div className="w-64 h-48 bg-gray-700 rounded-lg flex items-center justify-center">
+                  <p className="text-white/50">Image URL not available</p>
                 </div>
-            );
-        }
-        
-        // Audio attachment
-        if (message.attachmentType === 'audio') {
-            const audioUrl = getFileUrl(message.attachmentUrl);
-            return (
-                <div className="space-y-2">
-                    {message.content && (
-                        <p className="mb-2 whitespace-pre-wrap break-words">{message.content}</p>
-                    )}
-                    <audio
-                        src={audioUrl}
-                        controls
-                        className="w-full"
-                        onError={(e) => console.error('Audio failed to load:', audioUrl)}
-                    >
-                        Your browser does not support the audio tag.
-                    </audio>
-                    <p className="text-xs text-white/50 mt-1">
-                        {message.attachmentName} • {formatFileSize(message.attachmentSize)}
-                    </p>
-                </div>
-            );
-        }
-        
-        // Document attachment
-        if (message.attachmentType === 'document') {
-            const docUrl = getFileUrl(message.attachmentUrl);
-            return (
-                <div className="space-y-2">
-                    {message.content && (
-                        <p className="mb-2 whitespace-pre-wrap break-words">{message.content}</p>
-                    )}
-                    <a
-                        href={docUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-3 p-3 bg-white/5 rounded-lg hover:bg-white/10 transition-colors"
-                        onClick={() => console.log('Opening document:', docUrl)}
-                    >
-                        <MdDescription size={24} className="text-blue-400" />
-                        <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium truncate">{message.attachmentName}</p>
-                            <p className="text-xs text-white/50">{formatFileSize(message.attachmentSize)}</p>
-                        </div>
-                        <MdDownload size={20} className="text-white/50 flex-shrink-0" />
-                    </a>
-                </div>
-            );
-        }
+              )}
+              <a
+                href={imageUrl}
+                download
+                className="absolute top-2 right-2 p-2 bg-black/50 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                onClick={(e) => e.stopPropagation()}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <MdDownload size={16} />
+              </a>
+            </div>
+            <p className="text-xs text-white/50 mt-1">
+              {message.attachmentName} • {formatFileSize(message.attachmentSize)}
+            </p>
+          </div>
+        );
+      }
+      
+      // Video attachment
+      if (message.attachmentType === 'video') {
+        const videoUrl = getFileUrl(message.attachmentUrl);
+        return (
+          <div className="space-y-2">
+            {message.content && (
+              <p className="mb-2 whitespace-pre-wrap break-words">{message.content}</p>
+            )}
+            <video
+              src={videoUrl}
+              controls
+              className="max-w-full max-h-64 rounded-lg"
+            >
+              Your browser does not support the video tag.
+            </video>
+            <p className="text-xs text-white/50 mt-1">
+              {message.attachmentName} • {formatFileSize(message.attachmentSize)}
+            </p>
+          </div>
+        );
+      }
+      
+      // Audio attachment
+      if (message.attachmentType === 'audio') {
+        const audioUrl = getFileUrl(message.attachmentUrl);
+        return (
+          <div className="space-y-2">
+            {message.content && (
+              <p className="mb-2 whitespace-pre-wrap break-words">{message.content}</p>
+            )}
+            <audio
+              src={audioUrl}
+              controls
+              className="w-full"
+            >
+              Your browser does not support the audio tag.
+            </audio>
+            <p className="text-xs text-white/50 mt-1">
+              {message.attachmentName} • {formatFileSize(message.attachmentSize)}
+            </p>
+          </div>
+        );
+      }
+      
+      // Document attachment
+      if (message.attachmentType === 'document') {
+        const docUrl = getFileUrl(message.attachmentUrl);
+        return (
+          <div className="space-y-2">
+            {message.content && (
+              <p className="mb-2 whitespace-pre-wrap break-words">{message.content}</p>
+            )}
+            <a
+              href={docUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-3 p-3 bg-white/5 rounded-lg hover:bg-white/10 transition-colors"
+            >
+              <MdDescription size={24} className="text-blue-400" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium truncate">{message.attachmentName}</p>
+                <p className="text-xs text-white/50">{formatFileSize(message.attachmentSize)}</p>
+              </div>
+              <MdDownload size={20} className="text-white/50 flex-shrink-0" />
+            </a>
+          </div>
+        );
+      }
     }
     
     // Text message
     return <p className="break-words whitespace-pre-wrap">{message.content}</p>;
-};
-
-
+  };
 
   const otherTypingUsers = typingUsers.filter(u => u !== currentUser);
 
@@ -482,7 +481,7 @@ const handleAttachmentSelect = async (attachmentData) => {
         )}
       </header>
 
-      {/* Messages - FIXED: Now displays in correct order (oldest top, newest bottom) */}
+      {/* Messages */}
       <main
         ref={chatBoxRef}
         className="flex-1 overflow-y-auto px-4 md:px-8 py-6 space-y-4"
@@ -498,9 +497,11 @@ const handleAttachmentSelect = async (attachmentData) => {
             </div>
           </div>
         ) : (
-          messages.map((message, index) => (
+          messages.map((message) => (
             <div
-              key={message.id || index}
+              key={message.id}
+              data-message-id={message.id}
+              data-sender={message.sender}
               className={`flex ${message.sender === currentUser ? "justify-end" : "justify-start"} animate-fadeIn`}
             >
               <div
@@ -519,9 +520,24 @@ const handleAttachmentSelect = async (attachmentData) => {
                 
                 {renderMessage(message)}
                 
-                <p className="text-xs text-white/50 mt-2 text-right">
-                  {timeAgo(getMessageTimestamp(message))}
-                </p>
+                <div className="flex items-center justify-end gap-1 mt-2">
+                  <p className="text-xs text-white/50">
+                    {timeAgo(getMessageTimestamp(message))}
+                  </p>
+                  
+                  {/* 🔥 NEW: Status indicator for sent messages */}
+                  {message.sender === currentUser && (
+                    <span className={`text-xs ${getStatusColor(message)}`}>
+                      {getStatusIcon(message) === '✓✓✓' ? (
+                        <MdDoneAll className="inline text-blue-400" size={14} />
+                      ) : getStatusIcon(message) === '✓✓' ? (
+                        <MdDoneAll className="inline text-green-400" size={14} />
+                      ) : (
+                        <MdDone className="inline text-white/50" size={14} />
+                      )}
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
           ))
@@ -534,14 +550,17 @@ const handleAttachmentSelect = async (attachmentData) => {
           <div className="relative flex-1 group">
             <div className="absolute -inset-0.5 bg-gradient-to-r from-[#5227FF] to-[#FF9FFC] rounded-full opacity-0 group-focus-within:opacity-50 blur-md transition-all duration-300"></div>
             <input
-  value={input}
-  onChange={handleInputChange} // Use this instead of inline function
-  onKeyDown={(e) => e.key === "Enter" && sendMessage()}
-  type="text"
-  placeholder="Type your message..."
-  disabled={sending || uploadingAttachment}
-  className="relative w-full bg-white/5 px-6 py-3 rounded-full text-white/90 placeholder-white/30 focus:outline-none border border-white/10 focus:border-transparent transition-all duration-200 disabled:opacity-50"
-/>
+              value={input}
+              onChange={(e) => {
+                setInput(e.target.value);
+                handleTyping();
+              }}
+              onKeyDown={(e) => e.key === "Enter" && sendMessage()}
+              type="text"
+              placeholder="Type your message..."
+              disabled={sending || uploadingAttachment}
+              className="relative w-full bg-white/5 px-6 py-3 rounded-full text-white/90 placeholder-white/30 focus:outline-none border border-white/10 focus:border-transparent transition-all duration-200 disabled:opacity-50"
+            />
           </div>
           
           <div className="flex gap-2">
