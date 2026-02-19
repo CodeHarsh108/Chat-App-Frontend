@@ -1,5 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
-import { MdAttachFile, MdSend, MdLogout, MdImage, MdVideoLibrary, MdAudiotrack, MdDescription, MdDownload, MdDone, MdDoneAll } from "react-icons/md";
+import { 
+  MdAttachFile, MdSend, MdLogout, MdImage, MdVideoLibrary, 
+  MdAudiotrack, MdDescription, MdDownload, MdDone, MdDoneAll,
+  MdReply, MdAddReaction 
+} from "react-icons/md";
 import useChatContext from "../context/ChatContext";
 import { useNavigate } from "react-router";
 import SockJS from "sockjs-client";
@@ -11,15 +15,21 @@ import { logoutApi, getAuthToken } from "../services/AuthServices";
 import AttachmentModal from "../config/AttachmentModal";
 import { getFileUrl, formatFileSize, sendAttachmentMessageApi } from "../services/AttachmentServices";
 import { useReadReceipts } from "../hooks/useReadReceipts";
+import ReactionPicker from "./ReactionPicker";
+import ReactionsDisplay from "./ReactionDisplay";
+import ReplyPreview from "./ReplyPreview";
+import ThreadView from "./ThreadView";
 
 const ChatPage = () => {
   const {
     roomId,
     currentUser,
     connected,
+    stompClient,
     setConnected,
     setRoomId,
     setCurrentUser,
+    setStompClient
   } = useChatContext();
 
   const navigate = useNavigate();
@@ -35,7 +45,6 @@ const ChatPage = () => {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const chatBoxRef = useRef(null);
-  const [stompClient, setStompClient] = useState(null);
   
   // Attachment states
   const [showAttachmentModal, setShowAttachmentModal] = useState(false);
@@ -46,7 +55,15 @@ const ChatPage = () => {
   const [typingUsers, setTypingUsers] = useState([]);
   const typingTimeoutRef = useRef(null);
 
-  // 🔥 NEW: Read receipts hook
+  // Reaction states
+  const [activeReactionMessage, setActiveReactionMessage] = useState(null);
+  const [reactionPickerPosition, setReactionPickerPosition] = useState({ top: 0, left: 0 });
+
+  // Reply states
+  const [replyToMessage, setReplyToMessage] = useState(null);
+  const [showThread, setShowThread] = useState(null);
+
+  // Read receipts hook
   const { getStatusIcon, getStatusColor } = useReadReceipts(
     stompClient, 
     roomId, 
@@ -103,6 +120,7 @@ const ChatPage = () => {
 
       client.connect(headers, () => {
         setStompClient(client);
+        
         toast.success("Connected to chat");
 
         // Subscribe to room messages
@@ -116,13 +134,50 @@ const ChatPage = () => {
           const data = JSON.parse(receipt.body);
           console.log('Receipt received:', data);
           
-          // Update message status in UI
           setMessages(prev => prev.map(msg => {
             if (msg.id === data.messageId) {
               return { ...msg, status: data.status, readBy: data.readBy };
             }
             return msg;
           }));
+        });
+
+        // 🔥 FIXED: Reactions subscription inside WebSocket connection
+        client.subscribe(`/topic/room/${roomId}/reactions`, (reaction) => {
+          const data = JSON.parse(reaction.body);
+          console.log('Reaction received:', data);
+          
+          setMessages(prev => prev.map(msg => {
+            if (msg.id === data.messageId) {
+              return {
+                ...msg,
+                reactions: data.reactions,
+                reactionCounts: data.reactionCounts,
+                totalReactions: data.totalReactions,
+                userReaction: data.username === currentUser ? data.emoji : msg.userReaction
+              };
+            }
+            return msg;
+          }));
+        });
+
+        // 🔥 FIXED: Replies subscription inside WebSocket connection
+        client.subscribe(`/topic/room/${roomId}/replies`, (reply) => {
+          const data = JSON.parse(reply.body);
+          console.log('Reply received:', data);
+          
+          if (data.type === 'REPLY') {
+            setMessages(prev => prev.map(msg => {
+              if (msg.id === data.parentMessageId) {
+                return {
+                  ...msg,
+                  hasReplies: true,
+                  replyCount: data.replyCount
+                };
+              }
+              return msg;
+            }));
+          }
         });
 
         // Subscribe to user status updates
@@ -206,22 +261,89 @@ const ChatPage = () => {
     }, 3000);
   };
 
+  // Reaction handler functions
+  const handleReaction = (messageId, emoji) => {
+    if (!stompClient) {
+      toast.error("Not connected to chat");
+      return;
+    }
+    
+    const message = messages.find(m => m.id === messageId);
+    
+    if (emoji === null) {
+      // Open reaction picker
+      return;
+    }
+    
+    if (message?.userReaction === emoji) {
+      // Remove reaction
+      stompClient.send(`/app/reaction/remove/${roomId}`, {}, JSON.stringify({
+        messageId,
+        emoji
+      }));
+    } else {
+      // Add/change reaction
+      stompClient.send(`/app/reaction/add/${roomId}`, {}, JSON.stringify({
+        messageId,
+        emoji
+      }));
+    }
+    
+    setActiveReactionMessage(null);
+  };
+
+  const openReactionPicker = (messageId, event) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    setReactionPickerPosition({
+      top: rect.top - 40,
+      left: rect.left
+    });
+    setActiveReactionMessage(messageId);
+  };
+
+  // Reply handler functions
+  const handleReply = (message) => {
+    setReplyToMessage(message);
+  };
+
+  const cancelReply = () => {
+    setReplyToMessage(null);
+  };
+
+  const openThread = (message) => {
+    setShowThread(message);
+  };
+
   // Send text message
   const sendMessage = async () => {
     if (!stompClient || !connected || !input.trim() || sending) return;
 
     setSending(true);
-    const message = {
-      content: input,
-      roomId: roomId
-    };
-
+    
     try {
-      stompClient.send(
-        `/app/sendMessage/${roomId}`,
-        {},
-        JSON.stringify(message)
-      );
+      if (replyToMessage) {
+        // Send as reply
+        stompClient.send(
+          `/app/reply/${roomId}`,
+          {},
+          JSON.stringify({
+            parentMessageId: replyToMessage.id,
+            content: input
+          })
+        );
+        setReplyToMessage(null);
+      } else {
+        // Send as normal message
+        stompClient.send(
+          `/app/sendMessage/${roomId}`,
+          {},
+          JSON.stringify({
+            content: input,
+            roomId: roomId
+          })
+        );
+      }
+      
       setInput("");
       
       if (typingTimeoutRef.current) {
@@ -293,124 +415,256 @@ const ChatPage = () => {
   const renderMessage = (message) => {
     console.log('RENDER MESSAGE:', message);
 
-    if (message.hasAttachment) {
-      if (message.attachmentType === 'image') {
-        const imageUrl = getFileUrl(message.attachmentUrl);
+    // Message content (text + attachment)
+    const renderContent = () => {
+        if (message.hasAttachment) {
+            if (message.attachmentType === 'image') {
+                const imageUrl = getFileUrl(message.attachmentUrl);
+                
+                return (
+                    <div className="space-y-3">
+                        {message.content && (
+                            <p className="whitespace-pre-wrap break-words">{message.content}</p>
+                        )}
+                        <div className="relative group">
+                            {imageUrl ? (
+                                <img
+                                    src={imageUrl}
+                                    alt={message.attachmentName || 'Image'}
+                                    className="max-w-full max-h-64 rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
+                                    onClick={() => window.open(imageUrl, '_blank')}
+                                    onError={(e) => {
+                                        console.error('Image failed to load:', imageUrl);
+                                        e.target.onerror = null;
+                                        e.target.src = 'https://via.placeholder.com/200x200?text=Image+Error';
+                                    }}
+                                />
+                            ) : (
+                                <div className="w-64 h-48 bg-gray-700 rounded-lg flex items-center justify-center">
+                                    <p className="text-white/50">Image URL not available</p>
+                                </div>
+                            )}
+                            <a
+                                href={imageUrl}
+                                download
+                                className="absolute top-2 right-2 p-2 bg-black/50 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                                onClick={(e) => e.stopPropagation()}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                            >
+                                <MdDownload size={16} />
+                            </a>
+                        </div>
+                        <p className="text-xs text-white/50">
+                            {message.attachmentName} • {formatFileSize(message.attachmentSize)}
+                        </p>
+                    </div>
+                );
+            }
+            
+            if (message.attachmentType === 'video') {
+                const videoUrl = getFileUrl(message.attachmentUrl);
+                return (
+                    <div className="space-y-3">
+                        {message.content && (
+                            <p className="whitespace-pre-wrap break-words">{message.content}</p>
+                        )}
+                        <video
+                            src={videoUrl}
+                            controls
+                            className="max-w-full max-h-64 rounded-lg"
+                        >
+                            Your browser does not support the video tag.
+                        </video>
+                        <p className="text-xs text-white/50">
+                            {message.attachmentName} • {formatFileSize(message.attachmentSize)}
+                        </p>
+                    </div>
+                );
+            }
+            
+            if (message.attachmentType === 'audio') {
+                const audioUrl = getFileUrl(message.attachmentUrl);
+                return (
+                    <div className="space-y-3">
+                        {message.content && (
+                            <p className="whitespace-pre-wrap break-words">{message.content}</p>
+                        )}
+                        <audio
+                            src={audioUrl}
+                            controls
+                            className="w-full"
+                        >
+                            Your browser does not support the audio tag.
+                        </audio>
+                        <p className="text-xs text-white/50">
+                            {message.attachmentName} • {formatFileSize(message.attachmentSize)}
+                        </p>
+                    </div>
+                );
+            }
+            
+            if (message.attachmentType === 'document') {
+                const docUrl = getFileUrl(message.attachmentUrl);
+                return (
+                    <div className="space-y-3">
+                        {message.content && (
+                            <p className="whitespace-pre-wrap break-words">{message.content}</p>
+                        )}
+                        <a
+                            href={docUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-3 p-3 bg-white/5 rounded-lg hover:bg-white/10 transition-colors"
+                        >
+                            <MdDescription size={24} className="text-blue-400" />
+                            <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium truncate">{message.attachmentName}</p>
+                                <p className="text-xs text-white/50">{formatFileSize(message.attachmentSize)}</p>
+                            </div>
+                            <MdDownload size={20} className="text-white/50 flex-shrink-0" />
+                        </a>
+                    </div>
+                );
+            }
+        }
         
-        return (
-          <div className="space-y-2">
-            {message.content && (
-              <p className="mb-2 whitespace-pre-wrap break-words">{message.content}</p>
+        // Text message
+        return <p className="break-words whitespace-pre-wrap">{message.content}</p>;
+    };
+
+    return (
+        <div
+            className={`max-w-[70%] md:max-w-[50%] rounded-2xl p-4 ${
+                message.sender === currentUser
+                    ? "bg-gradient-to-r from-[#5227FF] to-[#FF9FFC] text-white"
+                    : "bg-white/10 text-white/90 border border-white/10"
+            }`}
+        >
+            {/* Sender name (for messages from others) */}
+            {message.sender !== currentUser && (
+                <p className="text-xs text-white/50 mb-2 flex items-center gap-1">
+                    <span className="w-2 h-2 bg-green-500 rounded-full"></span>
+                    {message.sender}
+                </p>
             )}
-            <div className="relative group">
-              {imageUrl ? (
-                <img
-                  src={imageUrl}
-                  alt={message.attachmentName || 'Image'}
-                  className="max-w-full max-h-64 rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
-                  onClick={() => window.open(imageUrl, '_blank')}
-                  onError={(e) => {
-                    console.error('Image failed to load:', imageUrl);
-                    e.target.onerror = null;
-                    e.target.src = 'https://via.placeholder.com/200x200?text=Image+Error';
-                  }}
-                />
-              ) : (
-                <div className="w-64 h-48 bg-gray-700 rounded-lg flex items-center justify-center">
-                  <p className="text-white/50">Image URL not available</p>
+
+            {/* Message content */}
+            {renderContent()}
+
+            {/* Reactions Display */}
+            {(message.reactions && Object.keys(message.reactions).length > 0) && (
+                <div className="flex items-center gap-2 mt-3 flex-wrap">
+                    {Object.entries(message.reactionCounts || {}).map(([emoji, count]) => (
+                        <button
+                            key={emoji}
+                            onClick={() => handleReaction(message.id, emoji)}
+                            className={`px-3 py-1.5 rounded-full text-sm flex items-center gap-2 transition-all ${
+                                message.userReaction === emoji
+                                    ? 'bg-[#5227FF]/20 border border-[#5227FF]'
+                                    : 'bg-white/5 hover:bg-white/10 border border-white/10'
+                            }`}
+                            title={`${message.reactions[emoji]?.length || 0} people reacted`}
+                        >
+                            <span className="text-base">{emoji}</span>
+                            <span className={`text-xs font-medium ${
+                                message.userReaction === emoji ? 'text-[#FF9FFC]' : 'text-white/50'
+                            }`}>
+                                {count}
+                            </span>
+                        </button>
+                    ))}
+                    
+                    {/* Add reaction button */}
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            openReactionPicker(message.id, e);
+                        }}
+                        className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center transition-colors border border-white/10 hover:border-white/20"
+                        title="Add reaction"
+                    >
+                        <MdAddReaction size={16} className="text-white/40" />
+                    </button>
                 </div>
-              )}
-              <a
-                href={imageUrl}
-                download
-                className="absolute top-2 right-2 p-2 bg-black/50 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
-                onClick={(e) => e.stopPropagation()}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                <MdDownload size={16} />
-              </a>
-            </div>
-            <p className="text-xs text-white/50 mt-1">
-              {message.attachmentName} • {formatFileSize(message.attachmentSize)}
-            </p>
-          </div>
-        );
-      }
-      
-      // Video attachment
-      if (message.attachmentType === 'video') {
-        const videoUrl = getFileUrl(message.attachmentUrl);
-        return (
-          <div className="space-y-2">
-            {message.content && (
-              <p className="mb-2 whitespace-pre-wrap break-words">{message.content}</p>
             )}
-            <video
-              src={videoUrl}
-              controls
-              className="max-w-full max-h-64 rounded-lg"
-            >
-              Your browser does not support the video tag.
-            </video>
-            <p className="text-xs text-white/50 mt-1">
-              {message.attachmentName} • {formatFileSize(message.attachmentSize)}
-            </p>
-          </div>
-        );
-      }
-      
-      // Audio attachment
-      if (message.attachmentType === 'audio') {
-        const audioUrl = getFileUrl(message.attachmentUrl);
-        return (
-          <div className="space-y-2">
-            {message.content && (
-              <p className="mb-2 whitespace-pre-wrap break-words">{message.content}</p>
+
+            {/* No reactions yet - show only add button */}
+            {(!message.reactions || Object.keys(message.reactions).length === 0) && (
+                <div className="mt-3">
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            openReactionPicker(message.id, e);
+                        }}
+                        className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center transition-colors border border-white/10 hover:border-white/20"
+                        title="Add reaction"
+                    >
+                        <MdAddReaction size={16} className="text-white/40" />
+                    </button>
+                </div>
             )}
-            <audio
-              src={audioUrl}
-              controls
-              className="w-full"
+
+            {/* Message footer with time and actions */}
+<div className="flex items-center justify-between mt-3 pt-2 border-t border-white/10">
+    <div className="flex items-center gap-3">
+        {/* Reply button */}
+        <button
+            onClick={() => handleReply(message)}
+            className="text-xs text-white/30 hover:text-white/50 transition-colors flex items-center gap-1 px-1"
+        >
+            <MdReply size={12} />
+            <span>Reply</span>
+        </button>
+        
+        {/* Reply count indicator - ONLY show if there are replies */}
+        {message.replyCount > 0 && (
+            <button
+                onClick={() => openThread(message)}
+                className="text-xs text-white/30 hover:text-white/50 transition-colors flex items-center gap-1"
             >
-              Your browser does not support the audio tag.
-            </audio>
-            <p className="text-xs text-white/50 mt-1">
-              {message.attachmentName} • {formatFileSize(message.attachmentSize)}
-            </p>
-          </div>
-        );
-      }
-      
-      // Document attachment
-      if (message.attachmentType === 'document') {
-        const docUrl = getFileUrl(message.attachmentUrl);
-        return (
-          <div className="space-y-2">
-            {message.content && (
-              <p className="mb-2 whitespace-pre-wrap break-words">{message.content}</p>
-            )}
-            <a
-              href={docUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-3 p-3 bg-white/5 rounded-lg hover:bg-white/10 transition-colors"
-            >
-              <MdDescription size={24} className="text-blue-400" />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{message.attachmentName}</p>
-                <p className="text-xs text-white/50">{formatFileSize(message.attachmentSize)}</p>
-              </div>
-              <MdDownload size={20} className="text-white/50 flex-shrink-0" />
-            </a>
-          </div>
-        );
-      }
-    }
+                <span>•</span>
+                <span>{message.replyCount} {message.replyCount === 1 ? 'reply' : 'replies'}</span>
+            </button>
+        )}
+    </div>
     
-    // Text message
-    return <p className="break-words whitespace-pre-wrap">{message.content}</p>;
-  };
+    <div className="flex items-center gap-2">
+        {/* Timestamp */}
+        <p className="text-xs text-white/40">
+            {timeAgo(getMessageTimestamp(message))}
+        </p>
+        
+        {/* Read receipt status for sent messages */}
+        {message.sender === currentUser && (
+            <span className={`text-xs ${getStatusColor(message)}`} title={
+                message.status === 'READ' ? 'Read' :
+                message.status === 'DELIVERED' ? 'Delivered' : 'Sent'
+            }>
+                {getStatusIcon(message) === '✓✓✓' ? (
+                    <MdDoneAll className="inline text-blue-400" size={14} />
+                ) : getStatusIcon(message) === '✓✓' ? (
+                    <MdDoneAll className="inline text-green-400" size={14} />
+                ) : (
+                    <MdDone className="inline text-white/40" size={14} />
+                )}
+            </span>
+        )}
+    </div>
+</div>
+
+            {/* Show if this is a reply to another message */}
+            {message.isReply && message.parentPreview && (
+                <div className="mt-2 pt-2 border-t border-white/10 text-xs text-white/30">
+                    <span className="flex items-center gap-1">
+                        <MdReply size={10} />
+                        Replying to {message.parentPreview.sender}
+                    </span>
+                </div>
+            )}
+        </div>
+    );
+};
 
   const otherTypingUsers = typingUsers.filter(u => u !== currentUser);
 
@@ -504,45 +758,21 @@ const ChatPage = () => {
               data-sender={message.sender}
               className={`flex ${message.sender === currentUser ? "justify-end" : "justify-start"} animate-fadeIn`}
             >
-              <div
-                className={`max-w-[70%] md:max-w-[50%] rounded-2xl p-4 ${
-                  message.sender === currentUser
-                    ? "bg-gradient-to-r from-[#5227FF] to-[#FF9FFC] text-white"
-                    : "bg-white/10 text-white/90 border border-white/10"
-                }`}
-              >
-                {message.sender !== currentUser && (
-                  <p className="text-xs text-white/50 mb-1 flex items-center gap-1">
-                    <span className="w-2 h-2 bg-green-500 rounded-full"></span>
-                    {message.sender}
-                  </p>
-                )}
-                
-                {renderMessage(message)}
-                
-                <div className="flex items-center justify-end gap-1 mt-2">
-                  <p className="text-xs text-white/50">
-                    {timeAgo(getMessageTimestamp(message))}
-                  </p>
-                  
-                  {/* 🔥 NEW: Status indicator for sent messages */}
-                  {message.sender === currentUser && (
-                    <span className={`text-xs ${getStatusColor(message)}`}>
-                      {getStatusIcon(message) === '✓✓✓' ? (
-                        <MdDoneAll className="inline text-blue-400" size={14} />
-                      ) : getStatusIcon(message) === '✓✓' ? (
-                        <MdDoneAll className="inline text-green-400" size={14} />
-                      ) : (
-                        <MdDone className="inline text-white/50" size={14} />
-                      )}
-                    </span>
-                  )}
-                </div>
-              </div>
+              {renderMessage(message)}
             </div>
           ))
         )}
       </main>
+
+      {/* Reply Preview */}
+      {replyToMessage && (
+        <div className="px-4">
+          <ReplyPreview
+            parentMessage={replyToMessage}
+            onCancel={cancelReply}
+          />
+        </div>
+      )}
 
       {/* Input */}
       <div className="bg-gray-800/90 backdrop-blur-sm border-t border-white/10 p-4 flex-shrink-0">
@@ -557,7 +787,7 @@ const ChatPage = () => {
               }}
               onKeyDown={(e) => e.key === "Enter" && sendMessage()}
               type="text"
-              placeholder="Type your message..."
+              placeholder={replyToMessage ? "Write a reply..." : "Type your message..."}
               disabled={sending || uploadingAttachment}
               className="relative w-full bg-white/5 px-6 py-3 rounded-full text-white/90 placeholder-white/30 focus:outline-none border border-white/10 focus:border-transparent transition-all duration-200 disabled:opacity-50"
             />
@@ -593,6 +823,33 @@ const ChatPage = () => {
         onAttachmentSelect={handleAttachmentSelect}
         roomId={roomId}
       />
+
+      {/* Reaction Picker */}
+      {activeReactionMessage && (
+        <div
+          style={{
+            position: 'fixed',
+            top: reactionPickerPosition.top,
+            left: reactionPickerPosition.left,
+            zIndex: 100
+          }}
+        >
+          <ReactionPicker
+            onSelect={(emoji) => handleReaction(activeReactionMessage, emoji)}
+            onClose={() => setActiveReactionMessage(null)}
+          />
+        </div>
+      )}
+
+      {/* Thread View */}
+      {showThread && (
+        <ThreadView
+          parentMessage={showThread}
+          roomId={roomId}
+          onClose={() => setShowThread(null)}
+          currentUser={currentUser}
+        />
+      )}
     </div>
   );
 };

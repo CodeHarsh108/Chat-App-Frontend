@@ -7,6 +7,7 @@ export const ChatProvider = ({ children }) => {
   const [roomId, setRoomId] = useState(localStorage.getItem('roomId') || "");
   const [currentUser, setCurrentUser] = useState(getUsername());
   const [connected, setConnected] = useState(false);
+  const [stompClient, setStompClient] = useState(null); // 🔥 ADD THIS
 
   // Sync roomId to localStorage
   useEffect(() => {
@@ -28,9 +29,11 @@ export const ChatProvider = ({ children }) => {
         roomId,
         currentUser,
         connected,
+        stompClient, // 🔥 ADD THIS
         setRoomId,
         setCurrentUser,
         setConnected,
+        setStompClient, // 🔥 ADD THIS
       }}
     >
       {children}
