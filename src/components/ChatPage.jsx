@@ -16,7 +16,6 @@ import AttachmentModal from "../config/AttachmentModal";
 import { getFileUrl, formatFileSize, sendAttachmentMessageApi } from "../services/AttachmentServices";
 import { useReadReceipts } from "../hooks/useReadReceipts";
 import ReactionPicker from "./ReactionPicker";
-import ReactionsDisplay from "./ReactionDisplay";
 import ReplyPreview from "./ReplyPreview";
 import ThreadView from "./ThreadView";
 
@@ -99,7 +98,7 @@ const ChatPage = () => {
     }
   }, [messages]);
 
-  // WebSocket connection
+  // 🔥 FIXED: WebSocket connection with proper factory function
   useEffect(() => {
     const connectWebSocket = () => {
       const token = getAuthToken();
@@ -110,8 +109,9 @@ const ChatPage = () => {
         return;
       }
 
-      const sock = new SockJS(`${baseURL}/chat`);
-      const client = Stomp.over(sock);
+      // ✅ CORRECT: Use factory function instead of direct socket instance
+      const socketFactory = () => new SockJS(`${baseURL}/chat`);
+      const client = Stomp.over(socketFactory);
       client.debug = () => {};
 
       const headers = {
@@ -120,7 +120,6 @@ const ChatPage = () => {
 
       client.connect(headers, () => {
         setStompClient(client);
-        
         toast.success("Connected to chat");
 
         // Subscribe to room messages
@@ -142,7 +141,7 @@ const ChatPage = () => {
           }));
         });
 
-        // 🔥 FIXED: Reactions subscription inside WebSocket connection
+        // Subscribe to reactions
         client.subscribe(`/topic/room/${roomId}/reactions`, (reaction) => {
           const data = JSON.parse(reaction.body);
           console.log('Reaction received:', data);
@@ -161,7 +160,7 @@ const ChatPage = () => {
           }));
         });
 
-        // 🔥 FIXED: Replies subscription inside WebSocket connection
+        // Subscribe to replies
         client.subscribe(`/topic/room/${roomId}/replies`, (reply) => {
           const data = JSON.parse(reply.body);
           console.log('Reply received:', data);
@@ -689,6 +688,12 @@ const ChatPage = () => {
             <div className="flex items-center gap-1 bg-green-500/10 px-3 py-1 rounded-full">
               <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
               <span className="text-white/70 text-sm">{onlineUsers.length} online</span>
+            </div>
+
+            {/* Encryption badge */}
+            <div className="flex items-center gap-1 bg-purple-500/10 px-3 py-1 rounded-full" title="End-to-end encrypted">
+                <span className="text-purple-400 text-xs">🔒</span>
+                <span className="text-white/70 text-xs">E2EE</span>
             </div>
           </div>
           
