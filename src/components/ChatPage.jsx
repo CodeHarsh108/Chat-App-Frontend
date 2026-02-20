@@ -18,6 +18,7 @@ import { useReadReceipts } from "../hooks/useReadReceipts";
 import ReactionPicker from "./ReactionPicker";
 import ReplyPreview from "./ReplyPreview";
 import ThreadView from "./ThreadView";
+import TextType from "../design/TextType";
 
 const ChatPage = () => {
   const {
@@ -729,13 +730,25 @@ const ChatPage = () => {
         </div>
 
         {/* Typing indicator */}
-        {otherTypingUsers.length > 0 && (
-          <div className="text-white/50 text-sm italic mt-1 animate-pulse">
-            {otherTypingUsers.length === 1 
-              ? `${otherTypingUsers[0]} is typing...`
-              : otherTypingUsers.length === 2
-              ? `${otherTypingUsers[0]} and ${otherTypingUsers[1]} are typing...`
-              : `${otherTypingUsers.length} people are typing...`}
+          {otherTypingUsers.length > 0 && (
+    <div className="text-white/50 text-sm italic mt-1 flex items-center">
+      <TextType 
+        text={[
+          `${otherTypingUsers.length === 1 
+            ? `${otherTypingUsers[0]} is typing` 
+            : otherTypingUsers.length === 2
+              ? `${otherTypingUsers[0]} and ${otherTypingUsers[1]} are typing`
+              : `${otherTypingUsers.length} people are typing`}...`
+        ]}
+        typingSpeed={50}
+        pauseDuration={2000}
+        loop={true}
+        showCursor={true}
+        cursorCharacter="..."
+        cursorClassName="text-white/50"
+        cursorBlinkDuration={0.3}
+      />
+
           </div>
         )}
       </header>

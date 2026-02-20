@@ -5,6 +5,9 @@ import { loginApi, registerApi } from "../services/AuthServices";
 import useChatContext from "../context/ChatContext";
 import LightPillar from '../design/LightPillar';
 import chatIcon from "../assets/chat.png";
+import SplitText from "../design/SplitText";
+import BlurText from "../design/BlurText";
+import { FiEye, FiEyeOff } from 'react-icons/fi';
 
 const AuthPage = () => {
   const [isLogin, setIsLogin] = useState(true);
@@ -12,34 +15,132 @@ const AuthPage = () => {
     username: "",
     email: "",
     password: "",
-    displayName: ""
+    confirmPassword: ""
   });
+  const [touchedFields, setTouchedFields] = useState({
+    username: false,
+    email: false,
+    password: false,
+    confirmPassword: false
+  });
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   
   const { setCurrentUser, setConnected } = useChatContext();
   const navigate = useNavigate();
 
+  const handleAnimationComplete = () => {
+    console.log('All letters have animated!');
+  };
+
+  // Handle field blur (mark as touched)
+  const handleFieldBlur = (field) => {
+    setTouchedFields(prev => ({
+      ...prev,
+      [field]: true
+    }));
+  };
+
+  // Handle field focus (reset touched state if empty)
+  const handleFieldFocus = (field) => {
+    if (!formData[field]) {
+      setTouchedFields(prev => ({
+        ...prev,
+        [field]: false
+      }));
+    }
+  };
+
   function handleInputChange(event) {
+    const { name, value } = event.target;
     setFormData({
       ...formData,
-      [event.target.name]: event.target.value
+      [name]: value
     });
+    
+    // Mark field as touched when user starts typing
+    if (!touchedFields[name]) {
+      setTouchedFields(prev => ({
+        ...prev,
+        [name]: true
+      }));
+    }
   }
 
   function validateForm() {
-    if (!formData.username || !formData.password) {
-      toast.error("Username and password are required!");
+    // Username validation
+    if (!formData.username.trim()) {
+      toast.error("Username is required!");
       return false;
     }
     
-    if (!isLogin && !formData.email) {
-      toast.error("Email is required for registration!");
+    if (formData.username.length < 3) {
+      toast.error("Username must be at least 3 characters!");
       return false;
     }
     
-    if (!isLogin && formData.password.length < 6) {
-      toast.error("Password must be at least 6 characters!");
+    if (formData.username.length > 20) {
+      toast.error("Username must be less than 20 characters!");
       return false;
+    }
+    
+    if (!/^[a-zA-Z0-9_]+$/.test(formData.username)) {
+      toast.error("Username can only contain letters, numbers, and underscores!");
+      return false;
+    }
+    
+    // Password validation (for both login and register)
+    if (!formData.password) {
+      toast.error("Password is required!");
+      return false;
+    }
+    
+    // Registration-specific validations
+    if (!isLogin) {
+      // Email validation
+      if (!formData.email) {
+        toast.error("Email is required!");
+        return false;
+      }
+      
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(formData.email)) {
+        toast.error("Please enter a valid email address!");
+        return false;
+      }
+      
+      // Password strength validation
+      if (formData.password.length < 6) {
+        toast.error("Password must be at least 6 characters!");
+        return false;
+      }
+      
+      if (!/(?=.*[a-z])/.test(formData.password)) {
+        toast.error("Password must contain at least one lowercase letter!");
+        return false;
+      }
+      
+      if (!/(?=.*[A-Z])/.test(formData.password)) {
+        toast.error("Password must contain at least one uppercase letter!");
+        return false;
+      }
+      
+      if (!/(?=.*\d)/.test(formData.password)) {
+        toast.error("Password must contain at least one number!");
+        return false;
+      }
+      
+      // Confirm password validation
+      if (!formData.confirmPassword) {
+        toast.error("Please confirm your password!");
+        return false;
+      }
+      
+      if (formData.password !== formData.confirmPassword) {
+        toast.error("Passwords do not match!");
+        return false;
+      }
     }
     
     return true;
@@ -60,22 +161,19 @@ const AuthPage = () => {
           username: formData.username,
           password: formData.password
         });
-        toast.success("Login successful!");
+        toast.success("Login successful! 🎉");
       } else {
         response = await registerApi({
           username: formData.username,
           email: formData.email,
-          password: formData.password,
-          displayName: formData.displayName || formData.username
+          password: formData.password
         });
-        toast.success("Registration successful!");
+        toast.success("Registration successful! 🎉");
       }
       
-      // Set user in context
       setCurrentUser(response.username);
       setConnected(true);
       
-      // Navigate to room selection
       navigate("/rooms");
       
     } catch (error) {
@@ -94,9 +192,25 @@ const AuthPage = () => {
       username: "",
       email: "",
       password: "",
-      displayName: ""
+      confirmPassword: ""
     });
+    setTouchedFields({
+      username: false,
+      email: false,
+      password: false,
+      confirmPassword: false
+    });
+    setShowPassword(false);
+    setShowConfirmPassword(false);
   }
+
+  // Get border class based on touched state
+  const getBorderClass = (field) => {
+    if (touchedFields[field] && formData[field]) {
+      return "border-white/30 ring-1 ring-white/30";
+    }
+    return "border-white/10";
+  };
 
   return (
     <div style={{ position: 'relative', width: '100%', minHeight: '100vh', overflow: 'hidden' }}>
@@ -112,14 +226,14 @@ const AuthPage = () => {
         <LightPillar
           topColor="#5227FF"
           bottomColor="#FF9FFC"
-          intensity={1.2}
+          intensity={1.5}
           rotationSpeed={0.2}
           glowAmount={0.003}
-          pillarWidth={3.5}
+          pillarWidth={5.0}
           pillarHeight={0.5}
           noiseIntensity={0.6}
           pillarRotation={25}
-          interactive={false}
+          interactive={true}
           mixBlendMode="screen"
           quality="high"
         />
@@ -142,7 +256,32 @@ const AuthPage = () => {
 
             {/* Title */}
             <h1 className="text-2xl font-semibold text-center text-white/90">
-              {isLogin ? "Welcome Back!" : "Create Account"}
+              {isLogin ? 
+                <SplitText
+                  text="Welcome Back!"
+                  className="text-3xl font-semibold text-center"
+                  delay={60}
+                  duration={1}
+                  ease="power3.out"
+                  splitType="chars"
+                  from={{ opacity: 0, y: 40 }}
+                  to={{ opacity: 1, y: 0 }}
+                  threshold={0.1}
+                  rootMargin="-100px"
+                  textAlign="center"
+                  onLetterAnimationComplete={handleAnimationComplete}
+                  showCallback
+                />
+               : 
+               <BlurText
+                 text="                 Create Account"
+                 delay={50}
+                 animateBy="words"
+                 direction="top"
+                 onAnimationComplete={handleAnimationComplete}
+                 className="text-2xl mb-8 text-center"
+               />
+              }
             </h1>
             
             <p className="text-center text-white/50 text-xs -mt-2 uppercase tracking-wider">
@@ -162,11 +301,16 @@ const AuthPage = () => {
                     name="username"
                     value={formData.username}
                     onChange={handleInputChange}
+                    onFocus={() => handleFieldFocus('username')}
+                    onBlur={() => handleFieldBlur('username')}
                     placeholder="johndoe"
-                    className="relative w-full bg-white/5 px-4 py-2.5 border border-white/10 rounded-lg focus:outline-none focus:border-transparent focus:ring-0 placeholder-white/30 text-white/90 text-sm transition-all duration-200"
+                    className={`relative w-full bg-white/5 px-4 py-2.5 border rounded-lg focus:outline-none focus:border-transparent focus:ring-0 placeholder-white/30 text-white/90 text-sm transition-all duration-200 ${getBorderClass('username')}`}
                     required
                   />
                 </div>
+                {touchedFields.username && !formData.username && (
+                  <p className="text-red-400 text-xs mt-1">Username is required</p>
+                )}
               </div>
 
               {/* Email - only for registration */}
@@ -182,31 +326,16 @@ const AuthPage = () => {
                       name="email"
                       value={formData.email}
                       onChange={handleInputChange}
+                      onFocus={() => handleFieldFocus('email')}
+                      onBlur={() => handleFieldBlur('email')}
                       placeholder="john@example.com"
-                      className="relative w-full bg-white/5 px-4 py-2.5 border border-white/10 rounded-lg focus:outline-none focus:border-transparent focus:ring-0 placeholder-white/30 text-white/90 text-sm transition-all duration-200"
+                      className={`relative w-full bg-white/5 px-4 py-2.5 border rounded-lg focus:outline-none focus:border-transparent focus:ring-0 placeholder-white/30 text-white/90 text-sm transition-all duration-200 ${getBorderClass('email')}`}
                       required={!isLogin}
                     />
                   </div>
-                </div>
-              )}
-
-              {/* Display Name - only for registration */}
-              {!isLogin && (
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-medium text-white/40 ml-1 uppercase tracking-wider">
-                    Display Name (Optional)
-                  </label>
-                  <div className="relative">
-                    <div className="absolute -inset-0.5 bg-gradient-to-r from-[#5227FF] to-[#FF9FFC] rounded-lg opacity-0 focus-within:opacity-50 blur-md transition-all duration-300"></div>
-                    <input
-                      type="text"
-                      name="displayName"
-                      value={formData.displayName}
-                      onChange={handleInputChange}
-                      placeholder="John Doe"
-                      className="relative w-full bg-white/5 px-4 py-2.5 border border-white/10 rounded-lg focus:outline-none focus:border-transparent focus:ring-0 placeholder-white/30 text-white/90 text-sm transition-all duration-200"
-                    />
-                  </div>
+                  {touchedFields.email && !formData.email && (
+                    <p className="text-red-400 text-xs mt-1">Email is required</p>
+                  )}
                 </div>
               )}
 
@@ -218,16 +347,82 @@ const AuthPage = () => {
                 <div className="relative">
                   <div className="absolute -inset-0.5 bg-gradient-to-r from-[#5227FF] to-[#FF9FFC] rounded-lg opacity-0 focus-within:opacity-50 blur-md transition-all duration-300"></div>
                   <input
-                    type="password"
+                    type={showPassword ? "text" : "password"}
                     name="password"
                     value={formData.password}
                     onChange={handleInputChange}
+                    onFocus={() => handleFieldFocus('password')}
+                    onBlur={() => handleFieldBlur('password')}
                     placeholder="••••••••"
-                    className="relative w-full bg-white/5 px-4 py-2.5 border border-white/10 rounded-lg focus:outline-none focus:border-transparent focus:ring-0 placeholder-white/30 text-white/90 text-sm transition-all duration-200"
+                    className={`relative w-full bg-white/5 px-4 py-2.5 border rounded-lg focus:outline-none focus:border-transparent focus:ring-0 placeholder-white/30 text-white/90 text-sm transition-all duration-200 ${getBorderClass('password')}`}
                     required
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-white/50 hover:text-white/80 transition-colors"
+                  >
+                    {showPassword ? <FiEyeOff size={18} /> : <FiEye size={18} />}
+                  </button>
                 </div>
+                {touchedFields.password && !formData.password && (
+                  <p className="text-red-400 text-xs mt-1">Password is required</p>
+                )}
+                {!isLogin && touchedFields.password && formData.password && formData.password.length < 6 && (
+                  <p className="text-red-400 text-xs mt-1">Password must be at least 6 characters</p>
+                )}
               </div>
+
+              {/* Confirm Password - only for registration */}
+              {!isLogin && (
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-medium text-white/40 ml-1 uppercase tracking-wider">
+                    Confirm Password
+                  </label>
+                  <div className="relative">
+                    <div className="absolute -inset-0.5 bg-gradient-to-r from-[#5227FF] to-[#FF9FFC] rounded-lg opacity-0 focus-within:opacity-50 blur-md transition-all duration-300"></div>
+                    <input
+                      type={showConfirmPassword ? "text" : "password"}
+                      name="confirmPassword"
+                      value={formData.confirmPassword}
+                      onChange={handleInputChange}
+                      onFocus={() => handleFieldFocus('confirmPassword')}
+                      onBlur={() => handleFieldBlur('confirmPassword')}
+                      placeholder="••••••••"
+                      className={`relative w-full bg-white/5 px-4 py-2.5 border rounded-lg focus:outline-none focus:border-transparent focus:ring-0 placeholder-white/30 text-white/90 text-sm transition-all duration-200 ${getBorderClass('confirmPassword')}`}
+                      required={!isLogin}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-white/50 hover:text-white/80 transition-colors"
+                    >
+                      {showConfirmPassword ? <FiEyeOff size={18} /> : <FiEye size={18} />}
+                    </button>
+                  </div>
+                  {touchedFields.confirmPassword && !formData.confirmPassword && (
+                    <p className="text-red-400 text-xs mt-1">Please confirm your password</p>
+                  )}
+                  {touchedFields.confirmPassword && formData.confirmPassword && formData.password !== formData.confirmPassword && (
+                    <p className="text-red-400 text-xs mt-1">Passwords do not match</p>
+                  )}
+                </div>
+              )}
+
+              {/* Password strength indicator for registration */}
+              {!isLogin && formData.password && (
+                <div className="space-y-1 mt-2">
+                  <div className="flex gap-1">
+                    <div className={`h-1 flex-1 rounded-full transition-all duration-300 ${formData.password.length >= 6 ? 'bg-green-500' : 'bg-red-500/30'}`}></div>
+                    <div className={`h-1 flex-1 rounded-full transition-all duration-300 ${/(?=.*[a-z])/.test(formData.password) ? 'bg-green-500' : 'bg-red-500/30'}`}></div>
+                    <div className={`h-1 flex-1 rounded-full transition-all duration-300 ${/(?=.*[A-Z])/.test(formData.password) ? 'bg-green-500' : 'bg-red-500/30'}`}></div>
+                    <div className={`h-1 flex-1 rounded-full transition-all duration-300 ${/(?=.*\d)/.test(formData.password) ? 'bg-green-500' : 'bg-red-500/30'}`}></div>
+                  </div>
+                  <p className="text-white/30 text-xs">
+                    Password must contain: 6+ chars, uppercase, lowercase, number
+                  </p>
+                </div>
+              )}
 
               {/* Submit Button */}
               <div className="relative group mt-6">

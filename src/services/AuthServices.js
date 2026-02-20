@@ -8,6 +8,8 @@ export const registerApi = async (userData) => {
       localStorage.setItem('refresh_token', response.data.refresh_token);
       localStorage.setItem('username', response.data.username);
       localStorage.setItem('displayName', response.data.displayName || response.data.username);
+      localStorage.setItem('token_timestamp', Date.now().toString());
+
     }
     return response.data;
   } catch (error) {
@@ -24,6 +26,8 @@ export const loginApi = async (credentials) => {
       localStorage.setItem('refresh_token', response.data.refresh_token);
       localStorage.setItem('username', response.data.username);
       localStorage.setItem('displayName', response.data.displayName || response.data.username);
+      localStorage.setItem('token_timestamp', Date.now().toString());
+
     }
     return response.data;
   } catch (error) {
@@ -51,8 +55,26 @@ export const getCurrentUserApi = async () => {
 };
 
 export const isAuthenticated = () => {
-  return !!localStorage.getItem('access_token');
+  const token = localStorage.getItem('access_token');
+  const timestamp = localStorage.getItem('token_timestamp');
+  
+  if (!token) return false;
+  
+  // Optional: Check if token is older than 24 hours
+  if (timestamp) {
+    const tokenAge = Date.now() - parseInt(timestamp);
+    const maxAge = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+    
+    if (tokenAge > maxAge) {
+      // Token expired, clear storage
+      logoutApi();
+      return false;
+    }
+  }
+  
+  return true;
 };
+
 
 export const getAuthToken = () => {
   return localStorage.getItem('access_token');

@@ -1,15 +1,46 @@
-<!doctype html>
-<html lang="en" class="light">
+<!DOCTYPE html>
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Chat App</title>
-    <script>
-      var global = window;
-    </script>
+    
+    <!-- 🔥 SEO Meta Tags -->
+    <title>QuickTalk - Real-Time Chat Application</title>
+    <meta name="description" content="QuickTalk is a real-time chat application with end-to-end encryption, file sharing, and instant messaging." />
+    <meta name="keywords" content="chat, real-time, messaging, encryption, secure" />
+    <meta name="author" content="Your Name" />
+    
+    <!-- Open Graph / Social Media Meta Tags -->
+    <meta property="og:title" content="QuickTalk - Real-Time Chat" />
+    <meta property="og:description" content="Secure, real-time messaging with E2EE" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://quicktalk.vercel.app" />
+    <meta property="og:image" content="/og-image.png" />
+    
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="QuickTalk - Real-Time Chat" />
+    <meta name="twitter:description" content="Secure, real-time messaging with E2EE" />
+    <meta name="twitter:image" content="/twitter-image.png" />
+    
+    <!-- Theme Color -->
+    <meta name="theme-color" content="#5227FF" />
+    
+    <!-- Preconnect to backend for faster loading -->
+    <link rel="preconnect" href="https://quicktalk-backend.onrender.com" />
+    <link rel="dns-prefetch" href="https://quicktalk-backend.onrender.com" />
   </head>
-  <body class="h-screen bg-gray-200 text-gray-800 dark:bg-gray-900 dark:text-gray-50">
+  <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
+    
+    <!-- Fallback for older browsers -->
+    <noscript>
+      <div style="text-align: center; padding: 2rem;">
+        <h2>JavaScript Required</h2>
+        <p>QuickTalk requires JavaScript to run. Please enable JavaScript in your browser.</p>
+      </div>
+    </noscript>
   </body>
 </html>
