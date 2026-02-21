@@ -100,33 +100,48 @@ const ChatPage = () => {
   }, [messages]);
 
   // 🔥 FIXED: WebSocket connection with proper factory function
-  useEffect(() => {
-    const connectWebSocket = () => {
-      const token = getAuthToken();
-      
-      if (!token) {
-        toast.error("Not authenticated");
-        handleLogout();
-        return;
-      }
+  // 🔥 CORRECTED: WebSocket connection with proper factory function
+useEffect(() => {
+  const connectWebSocket = () => {
+    const token = getAuthToken();
+    
+    if (!token) {
+      toast.error("Not authenticated");
+      handleLogout();
+      return;
+    }
 
-  const backendUrl = import.meta.env.VITE_API_URL || "http://localhost:8080";
-  const wsProtocol = backendUrl.startsWith('https') ? 'wss' : 'ws';
-  const wsUrl = backendUrl.replace(/^https?:\/\//, `${wsProtocol}://`);
-  
-  console.log('Connecting to WebSocket:', wsUrl);
+    // ✅ Get backend URL from environment
+    const backendUrl = import.meta.env.VITE_API_URL || "http://localhost:8080";
+    
+    // ✅ Log what we're using (for debugging)
+    console.log('Backend URL:', backendUrl);
+    
+    // ✅ IMPORTANT: SockJS needs the HTTP/HTTPS URL, not WebSocket URL
+    // It will automatically upgrade to WebSocket
+    const sockJsUrl = backendUrl;  // Use the exact same URL as your API
+    
+    console.log('Connecting to SockJS endpoint:', `${sockJsUrl}/chat`);
 
-      const socketFactory = () => new SockJS(`${backendUrl}/chat`);
-      const client = Stomp.over(socketFactory);
+    // ✅ Create factory function that returns a new SockJS instance
+    const socketFactory = () => new SockJS(`${sockJsUrl}/chat`);
+    const client = Stomp.over(socketFactory);
+    
+    // ✅ Disable debug logs in production
+    if (import.meta.env.VITE_DEBUG !== 'true') {
       client.debug = () => {};
+    }
 
-      const headers = {
-        'Authorization': `Bearer ${token}`
-      };
+    const headers = {
+      'Authorization': `Bearer ${token}`
+    };
 
-      client.connect(headers, () => {
+    client.connect(headers, 
+      // Success callback
+      () => {
         setStompClient(client);
         toast.success("Connected to chat");
+        console.log('✅ WebSocket connected successfully');
 
         // Subscribe to room messages
         client.subscribe(`/topic/room/${roomId}`, (message) => {
@@ -232,24 +247,30 @@ const ChatPage = () => {
         // Announce join
         client.send(`/app/join/${roomId}`, {}, {});
 
-      }, (error) => {
-        console.error("WebSocket connection failed:", error);
+      }, 
+      // Error callback
+      (error) => {
+        console.error("❌ WebSocket connection failed:", error);
         toast.error("Connection lost. Reconnecting...");
+        
+        // Retry after 3 seconds
         setTimeout(connectWebSocket, 3000);
-      });
-    };
-
-    if (connected && roomId) {
-      connectWebSocket();
-    }
-
-    return () => {
-      if (stompClient && stompClient.connected) {
-        stompClient.send(`/app/leave/${roomId}`, {}, {});
-        stompClient.disconnect();
       }
-    };
-  }, [roomId, connected]);
+    );
+  };
+
+  if (connected && roomId) {
+    connectWebSocket();
+  }
+
+  return () => {
+    if (stompClient && stompClient.connected) {
+      stompClient.send(`/app/leave/${roomId}`, {}, {});
+      stompClient.disconnect();
+      console.log('WebSocket disconnected');
+    }
+  };
+}, [roomId, connected, currentUser]); // ✅ Added currentUser dependency
 
   // Handle typing indicator
   const handleTyping = () => {
