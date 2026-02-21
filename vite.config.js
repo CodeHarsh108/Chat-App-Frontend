@@ -10,6 +10,10 @@ import tailwindcss from '@tailwindcss/vite'
 export default defineConfig({
   plugins: [react(), tailwindcss()],
 
+  define: {
+    global : 'window',
+  },
+
   darkMode: 'class', // Enable dark mode support
   
   //  IMPORTANT: Base URL for production
