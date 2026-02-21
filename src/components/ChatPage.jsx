@@ -110,8 +110,13 @@ const ChatPage = () => {
         return;
       }
 
-      // ✅ CORRECT: Use factory function instead of direct socket instance
-      const socketFactory = () => new SockJS(`${baseURL}/chat`);
+  const backendUrl = import.meta.env.VITE_API_URL || "http://localhost:8080";
+  const wsProtocol = backendUrl.startsWith('https') ? 'wss' : 'ws';
+  const wsUrl = backendUrl.replace(/^https?:\/\//, `${wsProtocol}://`);
+  
+  console.log('Connecting to WebSocket:', wsUrl);
+
+      const socketFactory = () => new SockJS(`${backendUrl}/chat`);
       const client = Stomp.over(socketFactory);
       client.debug = () => {};
 
